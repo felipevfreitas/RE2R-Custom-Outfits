@@ -1,0 +1,35 @@
+{
+  "character": "katherine",
+  "group": "pl6400",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl6400/pl6400/pl6400.mdf2",
+        "mesh": "sectionroot/character/player/pl6400/pl6400/pl6400.mesh",
+        "skin": "sectionroot/character/player/pl6400/pl6400/pl6400.mesh",
+        "chain": "sectionroot/character/player/pl6400/pl6400.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl6400/pl6450/pl6450.mdf2",
+        "mesh": "sectionroot/character/player/pl6400/pl6450/pl6450.mesh",
+        "skin": "sectionroot/character/player/pl6400/pl6450/pl6450.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl6400/pl6470/pl6470.mdf2",
+        "mesh": "sectionroot/character/player/pl6400/pl6470/pl6470.mesh",
+        "skin": "sectionroot/character/player/pl6400/pl6470/pl6470.mesh",
+        "chain": "sectionroot/character/player/pl6400/pl6470.chain"
+      }
+    }
+  }
+}

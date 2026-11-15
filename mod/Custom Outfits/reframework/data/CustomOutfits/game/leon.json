@@ -1,0 +1,302 @@
+{
+  "character": "leon",
+  "group": "pl0000",
+  "families": {
+    "normal": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "alt": [
+      5,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  "menu": {
+    "normal": [
+      0,
+      1,
+      3
+    ],
+    "alt": [
+      5,
+      8
+    ],
+    "extra": [
+      10,
+      11,
+      13
+    ]
+  },
+  "labels": {
+    "0": "Casual",
+    "1": "Police",
+    "3": "Police (Injured)",
+    "5": "Classic Police",
+    "8": "Classic Police (Injured)",
+    "10": "costume a",
+    "11": "costume b",
+    "13": "costume d"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0002/pl0002.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0002/pl0002.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0002/pl0002.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0002.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "1": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0000/pl0000.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0000/pl0000.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0000/pl0000.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050_01/pl0050_01.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "2": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0000/pl0000_01/pl0000_01.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0000/pl0000.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0000/pl0000.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050_02/pl0050_02.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "3": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0001/pl0001.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0001/pl0001.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0001/pl0001.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050_02/pl0050_02.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "4": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0001/pl0001_01/pl0001_01.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0001/pl0001.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0001/pl0001.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050_03/pl0050_03.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "5": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0003/pl0003.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "6": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0003/pl0003.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "7": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0003/pl0003.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0003/pl0003.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "8": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0006/pl0006.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0006/pl0006.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0006/pl0006.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "9": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0006/pl0006.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0006/pl0006.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0006/pl0006.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0070/pl0070.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0070/pl0070.mesh",
+        "chain": "sectionroot/character/player/pl0000/pl0070.chain"
+      }
+    },
+    "10": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0004/pl0004.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0004/pl0004.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0004/pl0004.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050_04/pl0050_04.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0074/pl0074.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0074/pl0074.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0074/pl0074.mesh",
+        "chain": null
+      }
+    },
+    "11": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0005/pl0005.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0005/pl0005.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0005/pl0005.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0050/pl0050.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0050/pl0050.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0050/pl0050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl0000/pl0075/pl0075.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0075/pl0075.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0075/pl0075.mesh",
+        "chain": null
+      }
+    },
+    "13": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl0000/pl0007/pl0007.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0007/pl0007.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0007/pl0007.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl0000/pl0057/pl0057.mdf2",
+        "mesh": "sectionroot/character/player/pl0000/pl0057/pl0057.mesh",
+        "skin": "sectionroot/character/player/pl0000/pl0057/pl0057.mesh",
+        "chain": null
+      }
+    }
+  }
+}

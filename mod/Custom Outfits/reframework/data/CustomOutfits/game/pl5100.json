@@ -1,0 +1,35 @@
+{
+  "character": "pl5100",
+  "group": "pl5100",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5100/pl5100/pl5100.mdf2",
+        "mesh": "sectionroot/character/player/pl5100/pl5100/pl5100.mesh",
+        "skin": "sectionroot/character/player/pl5100/pl5100/pl5100.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5100/pl5150/pl5150.mdf2",
+        "mesh": "sectionroot/character/player/pl5100/pl5150/pl5150.mesh",
+        "skin": "sectionroot/character/player/pl5100/pl5150/pl5150_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5100/pl5170/pl5170.mdf2",
+        "mesh": "sectionroot/character/player/pl5100/pl5170/pl5170.mesh",
+        "skin": "sectionroot/character/player/pl5100/pl5170/pl5170.mesh",
+        "chain": null
+      }
+    }
+  }
+}

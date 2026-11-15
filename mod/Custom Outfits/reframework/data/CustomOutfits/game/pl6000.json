@@ -1,0 +1,57 @@
+{
+  "character": "pl6000",
+  "group": "pl6000",
+  "families": {},
+  "menu": {
+    "extra": [
+      0,
+      1
+    ]
+  },
+  "labels": {
+    "0": "costume 0",
+    "1": "costume 1"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl6000/pl6000/pl6000.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6000/pl6000.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6000/pl6000.mesh",
+        "chain": "sectionroot/character/player/pl6000/pl6000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl6000/pl6050/pl6050.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6050/pl6050.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6050/pl6050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl6000/pl6070/pl6070.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6070/pl6070.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6070/pl6070.mesh",
+        "chain": null
+      }
+    },
+    "1": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl6000/pl6000/pl6000_01/pl6000_01.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6000/pl6000.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6000/pl6000.mesh",
+        "chain": "sectionroot/character/player/pl6000/pl6000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl6000/pl6050/pl6050_01/pl6050_01.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6050/pl6050.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6050/pl6050_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl6000/pl6070/pl6070.mdf2",
+        "mesh": "sectionroot/character/player/pl6000/pl6070/pl6070.mesh",
+        "skin": "sectionroot/character/player/pl6000/pl6070/pl6070.mesh",
+        "chain": null
+      }
+    }
+  }
+}

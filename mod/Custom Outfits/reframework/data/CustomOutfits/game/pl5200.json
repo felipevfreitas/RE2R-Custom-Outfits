@@ -1,0 +1,57 @@
+{
+  "character": "pl5200",
+  "group": "pl5200",
+  "families": {},
+  "menu": {
+    "extra": [
+      0,
+      1
+    ]
+  },
+  "labels": {
+    "0": "costume 0",
+    "1": "costume 1"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5200/pl5200/pl5200.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5200/pl5200.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5200/pl5200.mesh",
+        "chain": "sectionroot/character/player/pl5200/pl5200.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5200/pl5250/pl5250.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5250/pl5250.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5250/pl5250_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5200/pl5270/pl5270.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5270/pl5270.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5270/pl5270.mesh",
+        "chain": "sectionroot/character/player/pl5200/pl5270.chain"
+      }
+    },
+    "1": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5200/pl5200/pl5200.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5200/pl5200.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5200/pl5200.mesh",
+        "chain": "sectionroot/character/player/pl5200/pl5200.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5200/pl5251/pl5251.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5251/pl5251.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5251/pl5251.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5200/pl5271/pl5271.mdf2",
+        "mesh": "sectionroot/character/player/pl5200/pl5271/pl5271.mesh",
+        "skin": "sectionroot/character/player/pl5200/pl5271/pl5271.mesh",
+        "chain": null
+      }
+    }
+  }
+}

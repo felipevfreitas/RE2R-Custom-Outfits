@@ -1,0 +1,26 @@
+<Project>
+  <!-- Settings shared by the program (App) and the test command line (Cli). -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CustomOutfits</RootNamespace>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <!-- .NET Framework 4.8 ships with Windows 10/11: nothing for the user to install -->
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Lib\*.cs" Link="Lib\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 0.50.7: fixes the "zip slip" flaw (GHSA-6c8g-7p36-r338) of versions < 0.48; includes zstd -->
+    <PackageReference Include="SharpCompress" Version="0.50.7" />
+    <!-- SharpCompress 0.50 was built against these versions, but the package doesn't declare them for net48 -->
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+    <PackageReference Include="System.Buffers" Version="4.6.1" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
+    <PackageReference Include="System.Numerics.Vectors" Version="4.6.1" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+</Project>

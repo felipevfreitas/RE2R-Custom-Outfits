@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- RE2R Custom Outfits Converter: WPF program (.NET Framework 4.8, included in Windows 10/11).
+       Costura embeds the libraries in the .exe: a single file. -->
+  <Import Project="..\Common.props" />
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>RE2R-Custom-Outfits-Converter</AssemblyName>
+    <Product>RE2R Custom Outfits Converter</Product>
+    <AssemblyTitle>RE2R Custom Outfits Converter</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <Description>Converts Resident Evil 2 Remake skin mods so they no longer replace the original outfits.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+    <!-- program logo (shirt) - .exe icon -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- window icon and logo; logo-source.webp is only the original and is not built into the .exe -->
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\logo.png" />
+    <None Remove="Assets\logo-source.webp" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Fody" Version="6.8.2" PrivateAssets="all" />
+    <PackageReference Include="Costura.Fody" Version="5.7.0" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

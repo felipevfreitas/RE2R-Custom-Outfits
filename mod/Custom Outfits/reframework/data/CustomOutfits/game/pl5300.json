@@ -1,0 +1,101 @@
+{
+  "character": "pl5300",
+  "group": "pl5300",
+  "families": {},
+  "menu": {
+    "extra": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "labels": {
+    "0": "costume 0",
+    "1": "costume 1",
+    "2": "costume 2",
+    "3": "costume 3"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5300/pl5300/pl5300_01/pl5300_01.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5300.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5300/pl5350/pl5350.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5350/pl5350.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5350/pl5350_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5300/pl5370/pl5370.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5370.chain"
+      }
+    },
+    "1": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5300/pl5300/pl5300.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5300.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5300/pl5350/pl5350.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5350/pl5350.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5350/pl5350_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5300/pl5370/pl5370.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5370.chain"
+      }
+    },
+    "2": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5300/pl5300/pl5300_02/pl5300_02.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5300.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5300/pl5350/pl5350_01/pl5350_01.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5350/pl5350.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5350/pl5350_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5300/pl5370/pl5370.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5370.chain"
+      }
+    },
+    "3": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl5300/pl5300/pl5300_03/pl5300_03.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5300/pl5300.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5300.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl5300/pl5350/pl5350_02/pl5350_02.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5350/pl5350.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5350/pl5350_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl5300/pl5370/pl5370.mdf2",
+        "mesh": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "skin": "sectionroot/character/player/pl5300/pl5370/pl5370.mesh",
+        "chain": "sectionroot/character/player/pl5300/pl5370.chain"
+      }
+    }
+  }
+}

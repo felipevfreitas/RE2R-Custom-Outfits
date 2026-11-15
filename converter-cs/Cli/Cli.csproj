@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Command line for testing only (analyze/convert/build without the UI). -->
+  <Import Project="..\Common.props" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>co-cli</AssemblyName>
+  </PropertyGroup>
+</Project>

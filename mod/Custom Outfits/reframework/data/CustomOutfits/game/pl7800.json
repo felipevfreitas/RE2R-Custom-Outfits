@@ -1,0 +1,35 @@
+{
+  "character": "pl7800",
+  "group": "pl7800",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl7800/pl7800/pl7800.mdf2",
+        "mesh": "sectionroot/character/player/pl7800/pl7800/pl7800.mesh",
+        "skin": "sectionroot/character/player/pl7800/pl7800/pl7800.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl7800/pl7850/pl7850.mdf2",
+        "mesh": "sectionroot/character/player/pl7800/pl7850/pl7850.mesh",
+        "skin": "sectionroot/character/player/pl7800/pl7850/pl7850_blend.mesh",
+        "chain": null
+      },
+      "hair": {
+        "mdf": "sectionroot/character/player/pl7800/pl7870/pl7870.mdf2",
+        "mesh": "sectionroot/character/player/pl7800/pl7870/pl7870.mesh",
+        "skin": "sectionroot/character/player/pl7800/pl7870/pl7870.mesh",
+        "chain": null
+      }
+    }
+  }
+}

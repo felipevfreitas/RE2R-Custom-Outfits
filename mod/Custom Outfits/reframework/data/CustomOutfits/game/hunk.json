@@ -1,0 +1,29 @@
+{
+  "character": "hunk",
+  "group": "pl4000",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl4000/pl4000/pl4000.mdf2",
+        "mesh": "sectionroot/character/player/pl4000/pl4000/pl4000.mesh",
+        "skin": "sectionroot/character/player/pl4000/pl4000/pl4000.mesh",
+        "chain": "sectionroot/character/player/pl4000/pl4000.chain"
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl4000/pl4050/pl4050.mdf2",
+        "mesh": "sectionroot/character/player/pl4000/pl4050/pl4050.mesh",
+        "skin": "sectionroot/character/player/pl4000/pl4050/pl4050.mesh",
+        "chain": null
+      }
+    }
+  }
+}

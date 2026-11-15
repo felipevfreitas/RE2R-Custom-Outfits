@@ -1,0 +1,29 @@
+{
+  "character": "pl7600",
+  "group": "pl7600",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl7600/pl7600/pl7600.mdf2",
+        "mesh": "sectionroot/character/player/pl7600/pl7600/pl7600.mesh",
+        "skin": "sectionroot/character/player/pl7600/pl7600/pl7600.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl7600/pl7650/pl7650.mdf2",
+        "mesh": "sectionroot/character/player/pl7600/pl7650/pl7650.mesh",
+        "skin": "sectionroot/character/player/pl7600/pl7650/pl7650.mesh",
+        "chain": null
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "character": "pl8600",
+  "group": "pl8600",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl8600/pl8600/pl8600.mdf2",
+        "mesh": "sectionroot/character/player/pl8600/pl8600/pl8600.mesh",
+        "skin": "sectionroot/character/player/pl8600/pl8600/pl8600.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl8600/pl8650/pl8650.mdf2",
+        "mesh": "sectionroot/character/player/pl8600/pl8650/pl8650.mesh",
+        "skin": "sectionroot/character/player/pl8600/pl8650/pl8650.mesh",
+        "chain": null
+      }
+    }
+  }
+}

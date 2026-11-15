@@ -1,0 +1,29 @@
+{
+  "character": "pl7100",
+  "group": "pl7100",
+  "families": {},
+  "menu": {
+    "extra": [
+      0
+    ]
+  },
+  "labels": {
+    "0": "costume 0"
+  },
+  "costumes": {
+    "0": {
+      "body": {
+        "mdf": "sectionroot/character/player/pl7100/pl7100/pl7100.mdf2",
+        "mesh": "sectionroot/character/player/pl7100/pl7100/pl7100.mesh",
+        "skin": "sectionroot/character/player/pl7100/pl7100/pl7100.mesh",
+        "chain": null
+      },
+      "face": {
+        "mdf": "sectionroot/character/player/pl7100/pl7150/pl7150.mdf2",
+        "mesh": "sectionroot/character/player/pl7100/pl7150/pl7150.mesh",
+        "skin": "sectionroot/character/player/pl7100/pl7150/pl7150.mesh",
+        "chain": null
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# Only the published parts of the project are tracked.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/converter-cs/
+!/mod/
+
+# build output
+bin/
+obj/
+*.user
+.vs/
