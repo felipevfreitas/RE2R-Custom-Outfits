@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- RE2R Custom Outfits Converter: WPF program (.NET Framework 4.8, included in Windows 10/11).
+  <!-- Custom Outfits Converter (RE2 and RE3): WPF program (.NET Framework 4.8, included in Windows 10/11).
        Costura embeds the libraries in the .exe: a single file. -->
   <Import Project="..\Common.props" />
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
-    <AssemblyName>RE2R-Custom-Outfits-Converter</AssemblyName>
-    <Product>RE2R Custom Outfits Converter</Product>
-    <AssemblyTitle>RE2R Custom Outfits Converter</AssemblyTitle>
-    <Version>1.2.0</Version>
+    <AssemblyName>Custom-Outfits-Converter</AssemblyName>
+    <Product>Custom Outfits Converter</Product>
+    <AssemblyTitle>Custom Outfits Converter</AssemblyTitle>
+    <Version>1.2.1</Version>
     <Description>Converts Resident Evil 2 and 3 Remake skin mods so they no longer replace the original outfits.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>none</DebugType>

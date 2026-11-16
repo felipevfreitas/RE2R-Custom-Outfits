@@ -10,7 +10,7 @@ Downloads are on the [Releases](../../releases) page.
 
 ## Using the converter
 
-Run `RE2R-Custom-Outfits-Converter.exe` (no install needed; .NET Framework 4.8 is already part of Windows 10/11).
+Run `Custom-Outfits-Converter.exe` (no install needed; .NET Framework 4.8 is already part of Windows 10/11).
 
 1. Drag one or more skin mods (`.zip`, `.rar`, `.7z` or a folder) onto the window.
 2. Check the outfit names.
@@ -39,7 +39,7 @@ cd RE2R-Custom-Outfits/converter-cs/App
 dotnet build -c Release
 ```
 
-The program is created at `converter-cs/App/bin/Release/net48/RE2R-Custom-Outfits-Converter.exe`. It is a single file: [Costura.Fody](https://github.com/Fody/Costura) embeds the libraries into the `.exe`.
+The program is created at `converter-cs/App/bin/Release/net48/Custom-Outfits-Converter.exe`. It is a single file: [Costura.Fody](https://github.com/Fody/Costura) embeds the libraries into the `.exe`.
 
 `converter-cs/Cli` is a small command-line version used for testing (`co-cli analyze|convert|build|re3tables`).
 

@@ -91,6 +91,7 @@ namespace CustomOutfits
 
     public partial class MainWindow : Window
     {
+        // (folder name kept from the old program name, so updating keeps the saved game folder)
         private static readonly string SettingsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RE2R Custom Outfits Converter");
         private static readonly string SettingsFile = Path.Combine(SettingsDir, "settings.txt");
 
