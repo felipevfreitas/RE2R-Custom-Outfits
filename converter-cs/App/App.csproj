@@ -8,8 +8,8 @@
     <AssemblyName>RE2R-Custom-Outfits-Converter</AssemblyName>
     <Product>RE2R Custom Outfits Converter</Product>
     <AssemblyTitle>RE2R Custom Outfits Converter</AssemblyTitle>
-    <Version>1.1.0</Version>
-    <Description>Converts Resident Evil 2 Remake skin mods so they no longer replace the original outfits.</Description>
+    <Version>1.2.0</Version>
+    <Description>Converts Resident Evil 2 and 3 Remake skin mods so they no longer replace the original outfits.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>none</DebugType>
     <!-- program logo (shirt) - .exe icon -->

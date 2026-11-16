@@ -1,10 +1,11 @@
-// Mdf2.cs - reads and rewrites texture paths in .mdf2 files (RE Engine, RE2R).
+// Mdf2.cs - reads and rewrites texture paths in .mdf2 files (RE Engine: RE2R and RE3R).
 // Header (same in both builds): "MDF\0", u16 version, u16 matCount, 8 B padding. Then:
 //   non-RT (.mdf2.10): 0x40 B materials (texCount @0x14, texHdrOff @0x28, mmtrOff @0x38),
 //                      0x18 B texture headers (typeOff @0, pathOff @0x10)
 //   RT (.mdf2.21):     0x50 B materials (texCount @0x14, texHdrOff @0x30, mmtrOff @0x48),
 //                      0x20 B texture headers (typeOff @0, pathOff @0x10)
-//   Strings are null-terminated UTF-16LE. The build is detected from the file itself.
+//   RE3 (.mdf2.13):    0x40 B materials like non-RT, 0x20 B texture headers like RT.
+//   Strings are null-terminated UTF-16LE. The layout is detected from the file itself.
 // Rewrite: new strings are APPENDED at the end and the pointers updated (the old strings stay orphaned).
 using System;
 using System.Collections.Generic;
@@ -41,15 +42,36 @@ namespace CustomOutfits
         private sealed class Layout { public int Mat, TexHdr, Mmtr, Tex; }
         private static readonly Layout NonRT = new Layout { Mat = 0x40, TexHdr = 0x28, Mmtr = 0x38, Tex = 0x18 };
         private static readonly Layout RT = new Layout { Mat = 0x50, TexHdr = 0x30, Mmtr = 0x48, Tex = 0x20 };
+        // RE3 (.mdf2.13): materials like the RE2 non-RT build, texture headers like the RE2 RT build
+        private static readonly Layout Re3 = new Layout { Mat = 0x40, TexHdr = 0x28, Mmtr = 0x38, Tex = 0x20 };
+
+        // a string pointer that makes sense: inside the file, even, after the tables
+        private static bool StrPtr(byte[] b, long p, long min) => p >= min && p < b.Length - 1 && (p & 1) == 0;
+
+        // every texture header of every material points to valid strings (tells 0x18 from 0x20 headers apart)
+        private static bool Valid(byte[] b, int matCount, Layout L)
+        {
+            long end = 0x10 + (long)matCount * L.Mat;
+            if (end + 8 > b.Length || U64(b, 0x10 + L.TexHdr) != end) return false;
+            for (int i = 0; i < matCount; i++)
+            {
+                int o = 0x10 + i * L.Mat;
+                long n = BitConverter.ToUInt32(b, o + 0x14), h = U64(b, o + L.TexHdr);
+                if (n > 4096 || h < end || h + n * L.Tex > b.Length) return false;
+                for (long t = 0; t < n; t++)
+                {
+                    int hp = (int)(h + t * L.Tex);
+                    if (!StrPtr(b, U64(b, hp), end) || !StrPtr(b, U64(b, hp + 0x10), end)) return false;
+                }
+            }
+            return true;
+        }
 
         private static Layout Detect(byte[] b, int matCount)
         {
             if (matCount == 0) return NonRT;
-            foreach (var L in new[] { NonRT, RT })
-            {
-                long end = 0x10 + (long)matCount * L.Mat;
-                if (end + 8 <= b.Length && 0x10 + L.Mmtr + 8 <= b.Length && U64(b, 0x10 + L.TexHdr) == end) return L;
-            }
+            foreach (var L in new[] { NonRT, Re3, RT })
+                if (Valid(b, matCount, L)) return L;
             throw new InvalidDataException("unknown mdf2 layout");
         }
 

@@ -1,36 +1,12 @@
-# RE2R Custom Outfits
+# Custom Outfits Converter
 
-Wear skin mods for **Resident Evil 2 Remake** without replacing any costume.
+A Windows program that converts **Resident Evil 2 Remake** and **Resident Evil 3 Remake** skin mods so they no longer replace any costume.
 
-Skin mods normally put their files on top of a costume's files, so they replace that costume, and two mods for the same costume can't be installed together. Custom Outfits moves each skin to its own folder and applies it in game with a REFramework script. Nothing is replaced, and skins made for DLC costumes can be worn over the costumes you already have.
+Skin mods normally put their files on top of a costume's files, so they replace that costume, and two mods for the same costume can't be installed together. The converter moves a mod's files to a folder of their own and describes them for the **Custom Outfits** mod (a REFramework script), which applies them in game. Nothing is replaced, and skins made for DLC costumes can be worn over the costumes you already have.
 
-This repository has two parts:
-
-| Part | What it is |
-|---|---|
-| [`mod/`](mod/Custom%20Outfits) | The mod: a REFramework Lua script plus tables of the game's costumes. |
-| [`converter-cs/`](converter-cs) | **Custom Outfits Converter**, a Windows program that converts skin mods into Custom Outfits packages for Fluffy Mod Manager. |
+The Custom Outfits mod itself is distributed on Nexus Mods (one page per game). This repository only contains the converter.
 
 Downloads are on the [Releases](../../releases) page.
-
-## Features
-
-- Install as many skins as you want, even several for the same costume.
-- Pick **Body**, **Face** and **Hair** per character from the REFramework menu.
-- **Body - Normal / Body - Alternative**: a skin for each costume family. Skins follow the story (dirt, damage, jacket on/off) when the mod includes those versions.
-- **Specific costume**: lock a skin to one costume of the game's menu, with the face and hair that go with it.
-- Applied before the character appears (no flash of the original costume).
-- Works on NPCs (Claire in Leon's campaign and vice versa) and on Ada, Sherry, Hunk, Tofu, Robert Kendo, Katherine and the Forgotten Soldier.
-- Supports both builds of the game: DX11 (non-RT) and DX12 (RT).
-
-## Installing the mod
-
-1. Install [REFramework](https://github.com/praydog/REFramework).
-2. Install `Custom Outfits.zip` with Fluffy Mod Manager (or extract its `reframework` folder into the game folder).
-3. Convert your skin mods with the converter and install the converted packages with Fluffy.
-4. Disable the original (unconverted) version of each skin you converted.
-
-In game, press **Insert** to open the REFramework menu. The **Custom Outfits** window opens with it.
 
 ## Using the converter
 
@@ -40,14 +16,15 @@ Run `RE2R-Custom-Outfits-Converter.exe` (no install needed; .NET Framework 4.8 i
 2. Check the outfit names.
 3. Save. Each mod becomes a `.zip` ready for Fluffy Mod Manager.
 
-The converter needs the game installed: it reads some original files (materials a mod doesn't ship, the story costume tables) from the game's `.pak` files. The game folder is found automatically through Steam; you can pick it by hand if needed.
+The game is recognized from the mod's files. The converter needs that game installed: it reads some original files (materials a mod doesn't ship, the costume tables) from the game's `.pak` files. The game folder is found automatically through Steam; for RE2 it can also be picked by hand.
 
 ### What the converter does
 
-- Copies the mod's meshes, textures and physics files to `natives/x64/custom_outfits/<character>/<outfit>/`, keeping each file's version (non-RT and RT files are both kept).
-- Rewrites the texture paths inside each `.mdf2` material so they point to the new folder.
-- Reads the game's costume prefabs to know which story stage each file belongs to.
+- Copies the mod's meshes, materials, textures and physics files to `natives/<platform>/custom_outfits/<character>/<outfit>/`, keeping each file's version (RE2 non-RT and RT files are both kept).
+- Rewrites the texture paths inside each `.mdf2` material so they point to the new folder (three material layouts are supported: RE2 non-RT, RE2 RT and RE3).
+- Works out which costume, body, face or hair each file belongs to, and the story stage it is used in (dirty, injured, without jacket...).
 - Writes one JSON per outfit part in `reframework/data/CustomOutfits/outfits/`, which the script reads.
+- Copies new master materials and high-resolution (`streaming/`) textures the mod ships, and warns when a material needs files that neither the mod nor the game has.
 - Writes `modinfo.ini` (name, author, version, screenshot, Fluffy category) and the final `.zip`.
 
 The original mod is never modified unless you choose **Save over original**.
@@ -64,7 +41,19 @@ dotnet build -c Release
 
 The program is created at `converter-cs/App/bin/Release/net48/RE2R-Custom-Outfits-Converter.exe`. It is a single file: [Costura.Fody](https://github.com/Fody/Costura) embeds the libraries into the `.exe`.
 
-`converter-cs/Cli` is a small command-line version used for testing (`co-cli analyze|convert|build`).
+`converter-cs/Cli` is a small command-line version used for testing (`co-cli analyze|convert|build|re3tables`).
+
+### Code layout
+
+| Path | What it is |
+|---|---|
+| `converter-cs/Lib/Core.cs` | Opening mods, plans, building the package |
+| `converter-cs/Lib/Convert.cs` | RE2 conversion |
+| `converter-cs/Lib/Re3.cs` | RE3 costume tables and conversion |
+| `converter-cs/Lib/Mdf2.cs` | Reading and rewriting texture paths in `.mdf2` materials |
+| `converter-cs/Lib/Pak.cs` | Reading original files from the game's `.pak` archives |
+| `converter-cs/Lib/Costumes.cs` | RE2 costume tables from the game's prefabs |
+| `converter-cs/App` | The WPF window |
 
 ### Libraries
 
@@ -75,8 +64,8 @@ The program is created at `converter-cs/App/bin/Release/net48/RE2R-Custom-Outfit
 
 - **praydog** for [REFramework](https://github.com/praydog/REFramework).
 - **FluffyQuack** for Fluffy Mod Manager.
+- **Ekey** for the RE Engine file name lists in [REE.PAK.Tool](https://github.com/Ekey/REE.PAK.Tool).
 - **Kiyushia**, whose [Custom Outfit System](https://www.nexusmods.com/residentevilrequiem/mods/623) for Resident Evil Requiem showed this idea works on the RE Engine.
-- Every skin author in the community.
 
 This project doesn't include or unlock any paid content. Resident Evil is a trademark of Capcom; this is an unofficial fan project.
 

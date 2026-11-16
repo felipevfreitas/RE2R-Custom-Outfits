@@ -2,6 +2,7 @@
 //   co-cli convert <mod> <output> <slug> "<Name>" [game_folder]
 //   co-cli analyze <archive_or_folder> [game_folder]
 //   co-cli build <archive_or_folder> <output.zip> [game_folder]
+//   co-cli re3tables <output_dir>   (RE3 costume tables for the script)
 using System;
 using System.Linq;
 
@@ -47,8 +48,15 @@ namespace CustomOutfits.Cli
                         foreach (var w in r.Warnings) Console.WriteLine("WARNING: " + w);
                         return 0;
                     }
+                    case "re3tables":
+                    {
+                        // RE3 costume tables for the script: reframework/data/CustomOutfits/game/*.json
+                        Re3.WriteGameTables(args[1]);
+                        Console.WriteLine("ok: " + string.Join(", ", Re3.Models.Select(m => m.Id)));
+                        return 0;
+                    }
                     default:
-                        Console.WriteLine("usage: co-cli convert|analyze|build ...");
+                        Console.WriteLine("usage: co-cli convert|analyze|build|re3tables ...");
                         return 2;
                 }
             }

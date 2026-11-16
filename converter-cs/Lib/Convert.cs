@@ -68,6 +68,7 @@ namespace CustomOutfits
         public bool DryRun;                                                    // analyze only, write nothing
         public Dictionary<string, string> Names = new Dictionary<string, string>(); // "character|part" -> name
         public string GameDir;
+        public string Package; // id of the converted package: face/hair of the same mod follow its body in game
     }
 
     public static class Converter
@@ -162,6 +163,18 @@ namespace CustomOutfits
                 .Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
             var paks = Paks(gameDir);
             var report = new ConvertReport();
+            // every .tex in the mod: virtual path (lowercase, no version) -> (natives folder, file path relative to it)
+            var extTex = new Dictionary<string, List<(string Natives, string Rel)>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pl in Platforms)
+                foreach (var natives in new[] { $"natives/{pl}", $"natives/{pl}/streaming" })
+                    foreach (var rel in ListFiles(OsPath(modRoot, natives)))
+                    {
+                        if (!Regex.IsMatch(rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)) continue;
+                        if (!natives.EndsWith("/streaming") && rel.StartsWith("streaming/", StringComparison.OrdinalIgnoreCase)) continue;
+                        string key = StripVer(rel).ToLowerInvariant();
+                        if (!extTex.TryGetValue(key, out var l)) extTex[key] = l = new List<(string, string)>();
+                        l.Add((natives, rel));
+                    }
             string jsonDir = OsPath(outRoot ?? ".", "reframework/data/CustomOutfits/outfits");
             if (!dry) Directory.CreateDirectory(jsonDir);
 
@@ -199,7 +212,20 @@ namespace CustomOutfits
                     if (Regex.IsMatch(rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase))
                         remap[$"{virtGroup}/{StripVer(rel)}".ToLowerInvariant()] = $"{newVirtBase}/{StripVer(rel)}".ToLowerInvariant();
                 }
-                Func<string, string> mapFn = p => remap.TryGetValue(p.ToLowerInvariant(), out var np) ? np : null;
+                // textures the mod keeps outside the character folder (e.g. natives/x64/Savina/*.tex):
+                // copied to <slug>/_ext/<path> when an mdf2 of this group references them
+                var extUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                Func<string, string> mapFn = p =>
+                {
+                    string lp = p.ToLowerInvariant();
+                    if (remap.TryGetValue(lp, out var np)) return np;
+                    if (extTex.ContainsKey(lp) && !lp.StartsWith(virtGroup + "/"))
+                    {
+                        extUsed.Add(lp);
+                        return $"{newVirtBase}/_ext/{lp}";
+                    }
+                    return null;
+                };
 
                 // copy every file that isn't an mdf2 (mesh, tex, chain...) keeping its subfolder
                 // (each file stays in the platform folder it came from: x64 = non-RT, stm = RT)
@@ -310,6 +336,16 @@ namespace CustomOutfits
                     report.Units.Add(new UnitInfo { Character = character, Dir = dir, Part = part, V = v, MdfSource = mdfSource, Rewritten = changed, HasChain = chain != null, HasBlend = blend != null });
                 }
 
+                foreach (var key in extUsed.OrderBy(k => k, StringComparer.Ordinal))
+                    foreach (var (natives, rel) in extTex[key])
+                    {
+                        report.Copied++;
+                        if (dry) continue;
+                        string dst = OsPath(outRoot, natives, newVirtBase, "_ext", rel.ToLowerInvariant());
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                        File.Copy(OsPath(modRoot, natives, rel), dst, true);
+                    }
+
                 // one outfit per part, with the story variants inside
                 var table = Costumes.Table(paks, gameDir, group);
                 // prefabs shipped by the mod itself take priority (e.g. PS1 links costume b back to the normal face/hair)
@@ -341,7 +377,7 @@ namespace CustomOutfits
                     string id = $"{character}_{slug}_{part}";
                     string name = opts.Names.TryGetValue($"{character}|{part}", out var nm) && !string.IsNullOrWhiteSpace(nm) ? nm : displayName;
                     var entry = new JObj().Set("id", id).Set("name", name).Set("character", character).Set("part", part)
-                        .Set("version", 2).Set("families", families.ToList()).Set("default", def)
+                        .Set("version", 2).Set("package", opts.Package).Set("families", families.ToList()).Set("default", def)
                         .Set("variants", variants.Select(v => v.ToJson()).ToList());
                     // body: face/hair that the MOD's prefabs set for each costume (specific costume)
                     if (part == "body")

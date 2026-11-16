@@ -109,6 +109,15 @@ namespace CustomOutfits
                 string f = Path.Combine(gameDir, n);
                 if (new FileInfo(f).Length > 16) _paks.Add(new Pak(f));
             }
+            // RE3: dlc/re_dlc_stm_<id>.pak
+            string dlc = Path.Combine(gameDir, "dlc");
+            if (Directory.Exists(dlc))
+                foreach (var f in Directory.GetFiles(dlc, "*.pak").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                    if (new FileInfo(f).Length > 16)
+                    {
+                        try { _paks.Add(new Pak(f)); } catch { /* unreadable DLC pak: skip it */ }
+                    }
+            // RE2: numbered folders with re_dlc_000.pak
             foreach (var d in Directory.GetDirectories(gameDir).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 if (!Regex.IsMatch(Path.GetFileName(d), @"^\d+$")) continue;

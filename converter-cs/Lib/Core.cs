@@ -32,7 +32,7 @@ namespace CustomOutfits
 
     public sealed class Plan
     {
-        public string Input, Extracted, GameDir, BaseName, PackageName;
+        public string Input, Extracted, Game = "re2", GameDir, BaseName, PackageName;
         public bool IsArchive;
         public List<PlanOption> Options = new List<PlanOption>();
         public List<string> Warnings = new List<string>();
@@ -49,6 +49,7 @@ namespace CustomOutfits
     {
         public static readonly Dictionary<string, string> CharNames = new Dictionary<string, string>
         {
+            ["jill"] = "Jill", ["carlos"] = "Carlos",
             ["claire"] = "Claire", ["leon"] = "Leon", ["ada"] = "Ada", ["sherry"] = "Sherry", ["hunk"] = "Hunk", ["tofu"] = "Tofu",
             ["kendo"] = "Robert Kendo", ["katherine"] = "Katherine (Runaway)", ["ghost"] = "Forgotten Soldier",
         };
@@ -59,13 +60,21 @@ namespace CustomOutfits
         private static readonly Regex Archive = new Regex(@"\.(zip|rar|7z)$", RegexOptions.IgnoreCase);
 
         // ------------------------------------------------------------------ game folder
-        private const string GameFolder = "RESIDENT EVIL 2  BIOHAZARD RE2";
+        // games: "re2" (Resident Evil 2 Remake) and "re3" (Resident Evil 3 Remake)
+        public static readonly Dictionary<string, string> GameNames = new Dictionary<string, string> { ["re2"] = "Resident Evil 2", ["re3"] = "Resident Evil 3" };
+        private static readonly Dictionary<string, string> GameFolders = new Dictionary<string, string>
+        {
+            ["re2"] = "RESIDENT EVIL 2  BIOHAZARD RE2", ["re3"] = "RE3",
+        };
 
-        public static bool IsGameDir(string d) =>
-            !string.IsNullOrEmpty(d) && File.Exists(Path.Combine(d, "re2.exe")) && File.Exists(Path.Combine(d, "re_chunk_000.pak"));
+        public static bool IsGameDir(string d, string game = "re2") =>
+            !string.IsNullOrEmpty(d) && File.Exists(Path.Combine(d, game + ".exe")) && File.Exists(Path.Combine(d, "re_chunk_000.pak"));
+
+        /// <summary>Which game a mod is for: RE3 keeps its characters under natives/*/escape/.</summary>
+        public static string GameOfMod(string modRoot) => Re3.IsRe3Mod(modRoot) ? "re3" : "re2";
 
         /// <summary>Default Steam path or any Steam library (libraryfolders.vdf).</summary>
-        public static string DetectGameDir()
+        public static string DetectGameDir(string game = "re2")
         {
             var libs = new List<string> { @"C:\Program Files (x86)\Steam" };
             try
@@ -83,8 +92,8 @@ namespace CustomOutfits
             }
             foreach (var lib in libs)
             {
-                string d = Path.Combine(lib, "steamapps", "common", GameFolder);
-                if (IsGameDir(d)) return d;
+                string d = Path.Combine(lib, "steamapps", "common", GameFolders[game]);
+                if (IsGameDir(d, game)) return d;
             }
             return null;
         }
@@ -176,7 +185,7 @@ namespace CustomOutfits
         }
 
         // suggested name: removes character names and the part word, which the menu already shows
-        private static readonly Regex CharWords = new Regex(@"\b(claire( redfield)?|leon( s\.?)?( kennedy)?|ada( wong)?|sherry( birkin)?)\b", RegexOptions.IgnoreCase);
+        private static readonly Regex CharWords = new Regex(@"\b(claire( redfield)?|leon( s\.?)?( kennedy)?|ada( wong)?|sherry( birkin)?|jill( valentine)?|carlos( oliveira)?)\b", RegexOptions.IgnoreCase);
         private static readonly Dictionary<string, Regex> PartWords = new Dictionary<string, Regex>
         {
             ["body"] = new Regex(@"\b(outfit|body)\b", RegexOptions.IgnoreCase),
@@ -224,9 +233,12 @@ namespace CustomOutfits
         }
 
         // ------------------------------------------------------------------ analyze
-        public static Plan Analyze(string input, string gameDir)
+        /// <summary>re2Dir: the RE2 folder; the RE3 folder is detected through Steam.</summary>
+        public static Plan Analyze(string input, string re2Dir) => Analyze(input, g => g == "re2" ? re2Dir : DetectGameDir(g));
+
+        /// <summary>gameDirOf("re2"/"re3") gives the game folder (null when unknown).</summary>
+        public static Plan Analyze(string input, Func<string, string> gameDirOf)
         {
-            if (!IsGameDir(gameDir)) throw new IOException("Game folder not found. Choose the Resident Evil 2 folder (the one with re2.exe).");
             if (!File.Exists(input) && !Directory.Exists(input)) throw new IOException("File or folder not found: " + input);
             bool isArchive = File.Exists(input);
             if (isArchive && !Archive.IsMatch(input)) throw new IOException("Unsupported file. Use .zip, .rar, .7z or a folder.");
@@ -241,11 +253,18 @@ namespace CustomOutfits
             var roots = new List<string>();
             FindModRoots(workDir, 0, roots);
             if (roots.Count == 0) { TryDelete(extracted); throw new IOException("No mod found: there is no 'natives' folder inside."); }
+            string game = roots.Any(r => GameOfMod(r) == "re3") ? "re3" : "re2";
+            string gameDir = gameDirOf(game);
+            if (!IsGameDir(gameDir, game))
+            {
+                TryDelete(extracted);
+                throw new IOException($"This is a {GameNames[game]} mod, but the game folder was not found. Choose the {GameNames[game]} folder (the one with {game}.exe).");
+            }
 
             string baseName = CleanName(Path.GetFileName(input.TrimEnd('\\', '/')));
             var plan = new Plan
             {
-                Input = input, IsArchive = isArchive, Extracted = extracted, GameDir = gameDir, BaseName = baseName,
+                Input = input, IsArchive = isArchive, Extracted = extracted, Game = game, GameDir = gameDir, BaseName = baseName,
                 PackageName = baseName + " (Custom Outfits)",
             };
             var usedSlugs = new HashSet<string>();
@@ -253,11 +272,13 @@ namespace CustomOutfits
             {
                 var info = ReadModinfo(root);
                 string optName = CleanName(info.TryGetValue("name", out var mn) && mn.Length > 0 ? mn : roots.Count == 1 ? baseName : Path.GetFileName(root));
-                string slug = Slugify(CharWords.Replace(roots.Count == 1 ? baseName : optName, " ")) + "_" + ShortHash(Path.GetFileName(input.TrimEnd('\\', '/')) + "|" + optName);
+                string slugBase = Slugify(CharWords.Replace(roots.Count == 1 ? baseName : optName, " "));
+                if (game == "re3" && slugBase.Length > 24) slugBase = slugBase.Substring(0, 24).TrimEnd('_'); // RE3 paths are deeper
+                string slug = slugBase + "_" + ShortHash(Path.GetFileName(input.TrimEnd('\\', '/')) + "|" + optName);
                 while (usedSlugs.Contains(slug)) slug += "_2";
                 usedSlugs.Add(slug);
                 ConvertReport rep;
-                try { rep = Converter.Convert(root, null, slug, optName, new ConvertOptions { DryRun = true, GameDir = gameDir }); }
+                try { rep = ConvertOption(game, root, null, slug, optName, new ConvertOptions { DryRun = true, GameDir = gameDir }); }
                 catch (Exception e) { plan.Warnings.Add(optName + ": " + e.Message); continue; }
                 string shot = info.TryGetValue("screenshot", out var sc) && sc.Length > 0 && File.Exists(Path.Combine(root, sc)) ? Path.Combine(root, sc) : null;
                 var opt = new PlanOption
@@ -291,6 +312,9 @@ namespace CustomOutfits
             return plan;
         }
 
+        private static ConvertReport ConvertOption(string game, string root, string outRoot, string slug, string name, ConvertOptions o) =>
+            game == "re3" ? Re3.Convert(root, outRoot, slug, name, o) : Converter.Convert(root, outRoot, slug, name, o);
+
         // ------------------------------------------------------------------ build
         /// <summary>overwrite: writes the new file and deletes the original (no backup; the user already confirmed a warning).</summary>
         public static BuildResult Build(Plan plan, string outZip, bool overwrite)
@@ -299,14 +323,16 @@ namespace CustomOutfits
             try
             {
                 string pkgName = SafeFileName(plan.PackageName);
-                string pkgDir = Path.Combine(staging, pkgName);
+                // staged under a short folder name ("p"): the package name is only given inside the .zip, so the
+                // staging paths stay under Windows' 260-character limit
+                string pkgDir = Path.Combine(staging, "p");
                 Directory.CreateDirectory(pkgDir);
                 var result = new BuildResult();
                 foreach (var opt in plan.Options)
                 {
                     var names = new Dictionary<string, string>();
                     foreach (var o in opt.Outfits) names[o.Character + "|" + o.Part] = (string.IsNullOrWhiteSpace(o.Name) ? opt.Name : o.Name).Trim();
-                    var rep = Converter.Convert(opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, GameDir = plan.GameDir });
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, GameDir = plan.GameDir, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);
                 }
@@ -331,7 +357,9 @@ namespace CustomOutfits
 
                 // .zip with the package folder; the new one is written first and only then the original is deleted
                 string tmpZip = Path.Combine(staging, "out.zip");
-                ZipFile.CreateFromDirectory(pkgDir, tmpZip, CompressionLevel.Optimal, true);
+                using (var zip = ZipFile.Open(tmpZip, ZipArchiveMode.Create))
+                    foreach (var f in Directory.EnumerateFiles(pkgDir, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal))
+                        zip.CreateEntryFromFile(f, pkgName + "/" + f.Substring(pkgDir.Length + 1).Replace('\\', '/'), CompressionLevel.Optimal);
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outZip)));
                 File.Copy(tmpZip, outZip, true);
                 if (overwrite && !string.Equals(Path.GetFullPath(plan.Input), Path.GetFullPath(outZip), StringComparison.OrdinalIgnoreCase))
@@ -348,6 +376,7 @@ namespace CustomOutfits
         {
             ["leon"] = "Leon", ["claire"] = "Claire", ["ada"] = "Ada", ["sherry"] = "Sherry",
             ["hunk"] = "Hunk", ["kendo"] = "Kendo", ["tofu"] = "Tofu",
+            ["jill"] = "Jill", ["carlos"] = "Carlos", // RE3
         };
 
         /// <summary>Package category: character of the main option's body (else the one with most outfits).
