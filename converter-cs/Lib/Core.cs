@@ -99,11 +99,26 @@ namespace CustomOutfits
         }
 
         // ------------------------------------------------------------------ utilities
+        private static string TempRoot => Path.Combine(Path.GetTempPath(), "CustomOutfitsConverter");
+
         private static string TempDir(string prefix)
         {
-            string d = Path.Combine(Path.GetTempPath(), "CustomOutfitsConverter", prefix + "_" + DateTime.Now.Ticks);
+            string d = Path.Combine(TempRoot, prefix + "_" + DateTime.Now.Ticks);
             Directory.CreateDirectory(d);
             return d;
+        }
+
+        /// <summary>Deletes temporary folders left by earlier runs (closed by force, crashed, files in use).
+        /// Extracted mods can take gigabytes. Only folders older than a few hours, so another open window is safe.</summary>
+        public static void SweepOldTemp()
+        {
+            try
+            {
+                if (!Directory.Exists(TempRoot)) return;
+                foreach (var d in Directory.GetDirectories(TempRoot))
+                    if (DateTime.Now - Directory.GetCreationTime(d) > TimeSpan.FromHours(6)) TryDelete(d);
+            }
+            catch { /* best effort */ }
         }
 
         /// <summary>Extracts .zip/.rar/.7z. Every path is checked: nothing can be written outside dest.</summary>

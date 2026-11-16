@@ -110,6 +110,7 @@ namespace CustomOutfits
             DragLeave += (s, e) => SetDropHighlight(false);
             Drop += OnDrop;
             Closing += (s, e) => ClearPlans();
+            System.Threading.Tasks.Task.Run(() => Core.SweepOldTemp()); // leftovers of earlier runs, in the background
             LoadGameDir();
             if (Environment.GetEnvironmentVariable("CO_SNAPSHOT") != null) SnapshotMode();
         }
