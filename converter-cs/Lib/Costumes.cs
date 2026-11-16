@@ -108,8 +108,12 @@ namespace CustomOutfits
                     foreach (var ver in PfbVers) // non-RT and RT
                     {
                         string rel = relBase + ver;
-                        string loose = Path.Combine(gameDir, "natives", "x64", rel.Replace('/', Path.DirectorySeparatorChar));
-                        buf = File.Exists(loose) ? File.ReadAllBytes(loose) : paks?.Read("natives/x64/" + rel);
+                        foreach (var plat in new[] { "x64", "stm" }) // non-RT and RT platform folders
+                        {
+                            string loose = Path.Combine(gameDir, "natives", plat, rel.Replace('/', Path.DirectorySeparatorChar));
+                            if (File.Exists(loose)) { buf = File.ReadAllBytes(loose); break; }
+                        }
+                        if (buf == null) buf = paks?.ReadAny("natives/x64/" + rel);
                         if (buf != null) break;
                     }
                     if (buf == null) continue;
@@ -136,7 +140,7 @@ namespace CustomOutfits
         /// <summary>Costume prefabs shipped by the MOD ITSELF (e.g. PS1 links costume b back to the normal face/hair).</summary>
         public static CostumeTable ModTable(string modRoot, string group)
         {
-            if (!Directory.Exists(Path.Combine(modRoot, "natives", "x64", "objectroot"))) return new CostumeTable();
+            if (!Directory.Exists(Path.Combine(modRoot, "natives", "x64", "objectroot")) && !Directory.Exists(Path.Combine(modRoot, "natives", "stm", "objectroot"))) return new CostumeTable();
             return Table(null, modRoot, group);
         }
 
@@ -175,7 +179,7 @@ namespace CustomOutfits
             for (int i = 0; i < 100; i++)
             {
                 string g = "pl" + (i * 100).ToString("D4");
-                if (PfbVers.Any(v => paks.Exists($"natives/x64/objectroot/prefab/character/survivor/parts/{g}/{g}_body_default.pfb.{v}"))) output.Add(g);
+                if (PfbVers.Any(v => paks.ExistsAny($"natives/x64/objectroot/prefab/character/survivor/parts/{g}/{g}_body_default.pfb.{v}"))) output.Add(g);
             }
             return output;
         }

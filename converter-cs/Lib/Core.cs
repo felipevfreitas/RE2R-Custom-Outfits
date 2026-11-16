@@ -166,6 +166,8 @@ namespace CustomOutfits
         {
             s = Archive.Replace(s, "");
             s = Regex.Replace(s, @"(-\d+)+$", "");        // Nexus suffix (id-version-date)
+            // newer Nexus suffix: "<id> <version> <date>T<time>Z <code>", e.g. "2535 1.0 2026-07-15T12-27Z pAPMqGlpR"
+            s = Regex.Replace(s, @"(\s+\d+)?\s+\S+\s+\d{4}-\d\d-\d\dT[\d-]+Z(\s+[A-Za-z0-9]+)?$", "");
             s = Regex.Replace(s, "_+", " ");
             s = Regex.Replace(s, @"\s*\|\s*", " - ");
             s = Regex.Replace(s, @"^RE2R?\s+", "", RegexOptions.IgnoreCase);
@@ -216,6 +218,8 @@ namespace CustomOutfits
         {
             string n = Regex.Replace(s, "[<>:\"/\\\\|?*]+", "");
             n = Regex.Replace(n, @"\s+", " ").Trim();
+            // the package folder is part of every file path: keep it short (Windows paths are limited to 260 characters)
+            if (n.Length > 60) n = n.Substring(0, 60).Trim();
             return n.Length > 0 ? n : "Custom Outfits";
         }
 

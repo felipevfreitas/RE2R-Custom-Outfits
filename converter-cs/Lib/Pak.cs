@@ -103,7 +103,12 @@ namespace CustomOutfits
             var re = new Regex(@"^re_chunk_000\.pak(\.patch_(\d+)\.pak)?$", RegexOptions.IgnoreCase);
             var names = Directory.GetFiles(gameDir).Select(Path.GetFileName).Where(n => re.IsMatch(n))
                 .OrderByDescending(n => { var m = re.Match(n); return m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : -1; });
-            foreach (var n in names) _paks.Add(new Pak(Path.Combine(gameDir, n)));
+            // the RT build ships empty placeholder patch paks (0 bytes): skip them
+            foreach (var n in names)
+            {
+                string f = Path.Combine(gameDir, n);
+                if (new FileInfo(f).Length > 16) _paks.Add(new Pak(f));
+            }
             foreach (var d in Directory.GetDirectories(gameDir).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 if (!Regex.IsMatch(Path.GetFileName(d), @"^\d+$")) continue;
@@ -151,7 +156,7 @@ namespace CustomOutfits
             return HashPath(p.ToLowerInvariant()) + ":" + HashPath(p.ToUpperInvariant());
         }
 
-        /// <summary>Full path with "natives/x64/" and numeric extension.</summary>
+        /// <summary>Full path with "natives/x64/" (or "natives/stm/") and numeric extension.</summary>
         public bool Exists(string p) => FindEntry(p, out _, out _);
 
         private bool FindEntry(string p, out Pak pak, out PakEntry entry)
@@ -166,5 +171,29 @@ namespace CustomOutfits
         }
 
         public byte[] Read(string p) => FindEntry(p, out var pak, out var e) ? pak.Read(e) : null;
+
+        // The non-RT build keeps its files under natives/x64/, the RT build (DX12) under natives/stm/.
+        private static string OtherPlatform(string p)
+        {
+            if (p.StartsWith("natives/x64/", StringComparison.OrdinalIgnoreCase)) return "natives/stm/" + p.Substring(12);
+            if (p.StartsWith("natives/stm/", StringComparison.OrdinalIgnoreCase)) return "natives/x64/" + p.Substring(12);
+            return null;
+        }
+
+        /// <summary>Like Read, but also tries the other platform folder (x64 / stm).</summary>
+        public byte[] ReadAny(string p)
+        {
+            var b = Read(p);
+            string o = b == null ? OtherPlatform(p) : null;
+            return o != null ? Read(o) : b;
+        }
+
+        /// <summary>Like Exists, but also tries the other platform folder (x64 / stm).</summary>
+        public bool ExistsAny(string p)
+        {
+            if (Exists(p)) return true;
+            string o = OtherPlatform(p);
+            return o != null && Exists(o);
+        }
     }
 }

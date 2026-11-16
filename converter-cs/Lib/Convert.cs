@@ -75,6 +75,8 @@ namespace CustomOutfits
         // mdf2 versions: "10" = non-RT build (DX11), "21" = RT build (DX12, Steam default).
         // Each file keeps the version it came with; an mdf2 missing from the mod is written in every version the pak has.
         public static readonly string[] MdfVers = { "10", "21" };
+        // platform folders under natives/: "x64" (non-RT build) and "stm" (RT build). Mods may use either, or both.
+        public static readonly string[] Platforms = { "x64", "stm" };
 
         private static readonly Dictionary<string, GamePaks> PaksCache = new Dictionary<string, GamePaks>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, SortedDictionary<string, CostumeTable>> AllTablesCache =
@@ -152,11 +154,12 @@ namespace CustomOutfits
             opts = opts ?? new ConvertOptions();
             bool dry = opts.DryRun;
             string gameDir = opts.GameDir;
-            string playerDir = OsPath(modRoot, "natives/x64/sectionroot/character/player");
-            if (!Directory.Exists(playerDir)) throw new IOException("mod has no natives/x64/sectionroot/character/player");
-            var groups = Directory.GetDirectories(playerDir).Select(Path.GetFileName)
+            string PlayerDir(string plat) => OsPath(modRoot, $"natives/{plat}/sectionroot/character/player");
+            var plats = Platforms.Where(pl => Directory.Exists(PlayerDir(pl))).ToList();
+            if (plats.Count == 0) throw new IOException("mod has no natives/x64 (or natives/stm)/sectionroot/character/player");
+            var groups = plats.SelectMany(pl => Directory.GetDirectories(PlayerDir(pl)).Select(Path.GetFileName))
                 .Where(g => Regex.IsMatch(g, @"^pl\d{4}$", RegexOptions.IgnoreCase)).Select(g => g.ToLowerInvariant())
-                .OrderBy(g => g, StringComparer.Ordinal).ToList();
+                .Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
             var paks = Paks(gameDir);
             var report = new ConvertReport();
             string jsonDir = OsPath(outRoot ?? ".", "reframework/data/CustomOutfits/outfits");
@@ -169,10 +172,25 @@ namespace CustomOutfits
                 var byPart = new List<KeyValuePair<string, List<Variant>>>(); // parts in order of appearance
                 int groupNum = int.Parse(group.Substring(2));
                 string virtGroup = $"sectionroot/character/player/{group}";
-                string groupDir = OsPath(playerDir, group);
-                string streamingDir = OsPath(modRoot, "natives/x64/streaming", virtGroup);
-                var main = ListFiles(groupDir);
-                var streaming = ListFiles(streamingDir);
+                // files of the group in every platform folder: relative path -> platforms that have it
+                var srcMain = new Dictionary<string, List<string>>();
+                var srcStream = new Dictionary<string, List<string>>();
+                void Collect(Dictionary<string, List<string>> into, string plat, string dirPath)
+                {
+                    foreach (var r in ListFiles(dirPath))
+                    {
+                        if (!into.TryGetValue(r, out var l)) into[r] = l = new List<string>();
+                        l.Add(plat);
+                    }
+                }
+                foreach (var pl in plats)
+                {
+                    Collect(srcMain, pl, OsPath(modRoot, $"natives/{pl}", virtGroup));
+                    Collect(srcStream, pl, OsPath(modRoot, $"natives/{pl}/streaming", virtGroup));
+                }
+                var groupPlats = plats.Where(pl => srcMain.Values.Any(l => l.Contains(pl)) || srcStream.Values.Any(l => l.Contains(pl))).ToList();
+                var main = srcMain.Keys.OrderBy(r => r, StringComparer.Ordinal).ToList();
+                var streaming = srcStream.Keys.OrderBy(r => r, StringComparer.Ordinal).ToList();
 
                 // map: original virtual path (lowercase, no version) -> custom path
                 var remap = new Dictionary<string, string>();
@@ -184,17 +202,20 @@ namespace CustomOutfits
                 Func<string, string> mapFn = p => remap.TryGetValue(p.ToLowerInvariant(), out var np) ? np : null;
 
                 // copy every file that isn't an mdf2 (mesh, tex, chain...) keeping its subfolder
-                void Copy(string srcRoot, string rel, string dstNatives)
+                // (each file stays in the platform folder it came from: x64 = non-RT, stm = RT)
+                void Copy(string natives, string rel)
                 {
                     report.Copied++;
                     if (dry) return;
-                    string dst = OsPath(outRoot, dstNatives, newVirtBase, rel.ToLowerInvariant());
+                    string dst = OsPath(outRoot, natives, newVirtBase, rel.ToLowerInvariant());
                     Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                    File.Copy(OsPath(srcRoot, rel), dst, true);
+                    File.Copy(OsPath(modRoot, natives, virtGroup, rel), dst, true);
                 }
                 foreach (var rel in main)
-                    if (!Regex.IsMatch(rel, @"\.mdf2\.\d+$", RegexOptions.IgnoreCase)) Copy(groupDir, rel, "natives/x64");
-                foreach (var rel in streaming) Copy(streamingDir, rel, "natives/x64/streaming");
+                    if (!Regex.IsMatch(rel, @"\.mdf2\.\d+$", RegexOptions.IgnoreCase))
+                        foreach (var pl in srcMain[rel]) Copy($"natives/{pl}", rel);
+                foreach (var rel in streaming)
+                    foreach (var pl in srcStream[rel]) Copy($"natives/{pl}/streaming", rel);
 
                 // units: every folder with files (pl1070, pl1050/pl1050_01, ...)
                 var dirs = new HashSet<string>(main.Where(r => r.Contains("/")).Select(PosixDir));
@@ -211,18 +232,19 @@ namespace CustomOutfits
                     string esc = Regex.Escape(bas);
 
                     // mdf2: from the mod (every version it ships: non-RT and/or RT) or from the pak
-                    var mdfs = new List<KeyValuePair<string, byte[]>>(); // version -> content
-                    foreach (var f in main.Where(r => PosixDir(r) == dir && Regex.IsMatch(PosixBase(r), $"^{esc}\\.mdf2\\.\\d+$", RegexOptions.IgnoreCase))
-                                          .OrderBy(r => r, StringComparer.Ordinal))
-                        mdfs.Add(new KeyValuePair<string, byte[]>(f.Substring(f.LastIndexOf('.') + 1), File.ReadAllBytes(OsPath(groupDir, f))));
+                    var mdfs = new List<(string Plat, string Ver, byte[] Buf)>();
+                    foreach (var f in main.Where(r => PosixDir(r) == dir && Regex.IsMatch(PosixBase(r), $"^{esc}\\.mdf2\\.\\d+$", RegexOptions.IgnoreCase)))
+                        foreach (var pl in srcMain[f])
+                            mdfs.Add((pl, f.Substring(f.LastIndexOf('.') + 1), File.ReadAllBytes(OsPath(modRoot, $"natives/{pl}", virtGroup, f))));
                     bool modMdf = mdfs.Count > 0;
                     string mdfSource = modMdf ? "mod" : "pak";
                     if (!modMdf)
                     {
+                        // every version the game has, written to every platform folder the mod uses
                         foreach (var ver in MdfVers)
                         {
-                            var buf = paks.Read($"natives/x64/{virtGroup}/{dir}/{bas}.mdf2.{ver}");
-                            if (buf != null) mdfs.Add(new KeyValuePair<string, byte[]>(ver, buf));
+                            var buf = paks.ReadAny($"natives/x64/{virtGroup}/{dir}/{bas}.mdf2.{ver}");
+                            if (buf != null) foreach (var pl in groupPlats) mdfs.Add((pl, ver, buf));
                         }
                         if (mdfs.Count == 0)
                         {
@@ -231,10 +253,10 @@ namespace CustomOutfits
                         }
                     }
                     int changed = 0;
-                    var rewritten = new List<KeyValuePair<string, byte[]>>();
+                    var rewritten = new List<(string Plat, string Ver, byte[] Buf)>();
                     foreach (var m in mdfs)
                     {
-                        rewritten.Add(new KeyValuePair<string, byte[]>(m.Key, Mdf2.RewriteTexturePaths(m.Value, mapFn, out int ch)));
+                        rewritten.Add((m.Plat, m.Ver, Mdf2.RewriteTexturePaths(m.Buf, mapFn, out int ch)));
                         changed = Math.Max(changed, ch);
                     }
 
@@ -254,9 +276,9 @@ namespace CustomOutfits
                     {
                         foreach (var m in rewritten)
                         {
-                            string mdfOut = OsPath(outRoot, "natives/x64", newVirtBase, dir, $"{bas}.mdf2.{m.Key}".ToLowerInvariant());
+                            string mdfOut = OsPath(outRoot, $"natives/{m.Plat}", newVirtBase, dir, $"{bas}.mdf2.{m.Ver}".ToLowerInvariant());
                             Directory.CreateDirectory(Path.GetDirectoryName(mdfOut));
-                            File.WriteAllBytes(mdfOut, m.Value);
+                            File.WriteAllBytes(mdfOut, m.Buf);
                         }
                     }
 
@@ -280,7 +302,7 @@ namespace CustomOutfits
                         Mesh = mesh?.ToLowerInvariant(),
                         SkinMesh = blend != null ? $"{newVirtBase}/{meshDir}/{StripVer(PosixBase(blend))}".ToLowerInvariant() : null,
                         Chain = chain != null ? $"{newVirtBase}/{StripVer(chain)}".ToLowerInvariant() : null,
-                        Textures = rewritten.SelectMany(m => CustomTextures(m.Value)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                        Textures = rewritten.SelectMany(m => CustomTextures(m.Buf)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
                     };
                     var list = byPart.FirstOrDefault(kv => kv.Key == part).Value;
                     if (list == null) { list = new List<Variant>(); byPart.Add(new KeyValuePair<string, List<Variant>>(part, list)); }
