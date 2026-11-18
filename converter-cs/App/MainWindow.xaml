@@ -1,7 +1,7 @@
 <Window x:Class="CustomOutfits.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Custom Outfits Converter" Icon="Assets/app.ico" Width="1040" Height="760" MinWidth="820" MinHeight="600"
+        Title="Wardrobe Converter" Icon="Assets/app.ico" Width="1040" Height="760" MinWidth="820" MinHeight="600"
         WindowStartupLocation="CenterScreen" Background="{StaticResource Bg}" Foreground="{StaticResource Text}" AllowDrop="True"
         FontFamily="Segoe UI" FontSize="14" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
   <Window.Resources>
@@ -103,17 +103,6 @@
     <!-- start: drop the mods -->
     <ScrollViewer x:Name="EmptyView" Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="24">
       <StackPanel MaxWidth="900">
-        <!-- only shown if the game folder isn't found -->
-        <Border x:Name="GameMissing" Style="{StaticResource Card}" Background="#2A1418" BorderBrush="#6B2531" Visibility="Collapsed">
-          <DockPanel>
-            <Button DockPanel.Dock="Right" Content="Choose folder" Style="{StaticResource BtnSmall}" Click="ChooseGame_Click" VerticalAlignment="Center" />
-            <StackPanel Margin="0,0,12,0">
-              <TextBlock Text="Resident Evil 2 not found" FontWeight="SemiBold" Foreground="#FFD5DB" />
-              <TextBlock Text="The converter reads original files from the game. Choose the game folder (the one with re2.exe)."
-                         Foreground="#E8B4BC" FontSize="12.5" TextWrapping="Wrap" Margin="0,2,0,0" />
-            </StackPanel>
-          </DockPanel>
-        </Border>
         <Grid x:Name="DropZone" MinHeight="320">
           <Rectangle x:Name="DropBorder" RadiusX="16" RadiusY="16" Stroke="#3A3A44" StrokeThickness="2" StrokeDashArray="4 3" Fill="#991B1B1F" />
           <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24,48">
@@ -127,9 +116,12 @@
           </StackPanel>
         </Grid>
         <TextBlock TextWrapping="Wrap" TextAlignment="Center" FontSize="12.5" Foreground="{StaticResource Muted}" MaxWidth="620" Margin="0,18,0,0"
-                   Text="The converter moves each mod to its own folder so it no longer replaces the original outfit. Install the result in Fluffy Mod Manager and pick it in game from the REFramework menu (Custom Outfits)." />
+                   Text="The converter moves each mod to its own folder so it no longer replaces the original outfit. Install the result in Fluffy Mod Manager and pick it in game from the costume menu (RE2) or the REFramework menu (Wardrobe)." />
         <TextBlock HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="12">
-          <Hyperlink x:Name="GameLink" Click="ChooseGame_Click" Foreground="{StaticResource Muted}">Game folder</Hyperlink>
+          <Run Text="Game folders:" Foreground="{StaticResource Muted}" />
+          <Hyperlink x:Name="GameLink2" Tag="re2" Click="ChooseGame_Click" Foreground="{StaticResource Muted}">Resident Evil 2</Hyperlink>
+          <Run Text="·" Foreground="{StaticResource Muted}" />
+          <Hyperlink x:Name="GameLink3" Tag="re3" Click="ChooseGame_Click" Foreground="{StaticResource Muted}">Resident Evil 3</Hyperlink>
         </TextBlock>
       </StackPanel>
     </ScrollViewer>
@@ -168,6 +160,23 @@
                       </TextBlock>
                       <TextBox Text="{Binding PackageName, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
+                  </Border>
+                  <Border Style="{StaticResource Card}" Visibility="{Binding PictureVisibility}">
+                    <DockPanel>
+                      <Border DockPanel.Dock="Left" Width="112" Height="112" CornerRadius="6" Background="#16FFFFFF" Margin="0,0,14,0"
+                              Visibility="{Binding PreviewVisibility}" ClipToBounds="True">
+                        <Image Source="{Binding PicturePreview}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                      </Border>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                        <Button Content="Use default" Style="{StaticResource BtnSmall}" Click="DefaultPicture_Click" Tag="{Binding}"
+                                Visibility="{Binding DefaultPictureVisibility}" Margin="0,0,8,0" />
+                        <Button Content="Choose image…" Style="{StaticResource BtnSmall}" Click="ChoosePicture_Click" Tag="{Binding}" />
+                      </StackPanel>
+                      <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="PICTURE IN THE GAME'S COSTUME MENU" Style="{StaticResource Label}" Margin="0,0,0,4" />
+                        <TextBlock Text="{Binding PictureText}" TextWrapping="Wrap" FontSize="13" />
+                      </StackPanel>
+                    </DockPanel>
                   </Border>
                   <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource GroupTemplate}" />
                   <Border Style="{StaticResource Card}" Background="#221D12" BorderBrush="#5A4415" Visibility="{Binding WarningsVisibility}" Margin="0">

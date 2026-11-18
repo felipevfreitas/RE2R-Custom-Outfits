@@ -20,6 +20,7 @@ namespace CustomOutfits
         public string Character, CharacterName, Part, PartName, Name;
         public List<string> Variants = new List<string>();
         public List<string> Also = new List<string>();
+        public string Drawn; // body: picture drawn from the outfit (PNG), used when the mod has no image
     }
 
     public sealed class PlanOption
@@ -34,8 +35,19 @@ namespace CustomOutfits
     {
         public string Input, Extracted, Game = "re2", GameDir, BaseName, PackageName;
         public bool IsArchive;
+        public string CustomPicture;   // image the user chose for the game costume menu (wins over the mod's)
+        public bool HasMenuPicture;    // the mod brings its own costume-menu picture (ui0601_*_iam.tex)
+        public string MenuPictureFile; // one of them (preview in the window)
+        public string DrawDir;         // temporary folder of the drawn pictures
         public List<PlanOption> Options = new List<PlanOption>();
         public List<string> Warnings = new List<string>();
+    }
+
+    /// <summary>The mod is for a game whose folder is unknown: the window asks for that folder and tries again.</summary>
+    public sealed class GameFolderMissingException : IOException
+    {
+        public string Game { get; }
+        public GameFolderMissingException(string game, string message) : base(message) { Game = game; }
     }
 
     public sealed class BuildResult
@@ -244,7 +256,7 @@ namespace CustomOutfits
             n = Regex.Replace(n, @"\s+", " ").Trim();
             // the package folder is part of every file path: keep it short (Windows paths are limited to 260 characters)
             if (n.Length > 60) n = n.Substring(0, 60).Trim();
-            return n.Length > 0 ? n : "Custom Outfits";
+            return n.Length > 0 ? n : "Wardrobe";
         }
 
         // ------------------------------------------------------------------ analyze
@@ -273,16 +285,17 @@ namespace CustomOutfits
             if (!IsGameDir(gameDir, game))
             {
                 TryDelete(extracted);
-                throw new IOException($"This is a {GameNames[game]} mod, but the game folder was not found. Choose the {GameNames[game]} folder (the one with {game}.exe).");
+                throw new GameFolderMissingException(game, $"This is a {GameNames[game]} mod, but the game folder was not found. Choose the {GameNames[game]} folder (the one with {game}.exe).");
             }
 
             string baseName = CleanName(Path.GetFileName(input.TrimEnd('\\', '/')));
             var plan = new Plan
             {
                 Input = input, IsArchive = isArchive, Extracted = extracted, Game = game, GameDir = gameDir, BaseName = baseName,
-                PackageName = baseName + " (Custom Outfits)",
+                PackageName = baseName + " (Wardrobe)",
             };
             var usedSlugs = new HashSet<string>();
+            var reports = new List<KeyValuePair<PlanOption, ConvertReport>>();
             foreach (var root in roots)
             {
                 var info = ReadModinfo(root);
@@ -316,8 +329,17 @@ namespace CustomOutfits
                     });
                 }
                 if (opt.Outfits.Count == 0) plan.Warnings.Add(optName + ": no character outfit found (only other files), skipped.");
-                else plan.Options.Add(opt);
+                else { plan.Options.Add(opt); reports.Add(new KeyValuePair<PlanOption, ConvertReport>(opt, rep)); }
                 foreach (var w in rep.Warnings) plan.Warnings.Add(optName + ": " + w);
+            }
+            plan.MenuPictureFile = roots.SelectMany(r => Directory.EnumerateFiles(r, "ui0601_*_iam.tex.*", SearchOption.AllDirectories))
+                .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
+            plan.HasMenuPicture = plan.MenuPictureFile != null;
+            // no image at all in the mod: the picture of each body is drawn from the outfit itself
+            if (game == "re2" && !plan.HasMenuPicture && plan.Options.All(o => o.Screenshot == null))
+            {
+                try { DrawPictures(plan, reports); }
+                catch { /* no picture: the game shows a placeholder */ }
             }
             if (plan.Options.Count == 0)
             {
@@ -325,6 +347,99 @@ namespace CustomOutfits
                 throw new IOException("This mod has no character outfits that can be converted.\n" + string.Join("\n", plan.Warnings));
             }
             return plan;
+        }
+
+        // ------------------------------------------------------------------ drawn pictures
+        private static readonly Dictionary<string, string> NonRtVersion = new Dictionary<string, string>
+        {
+            ["mesh"] = "1808312334", ["mdf2"] = "10", ["tex"] = "10",
+        };
+
+        /// <summary>A file by its game path (".mesh"/".mdf2"/".tex", no version), as the non-RT game would load it:
+        /// the mod's (root), else a loose file of the game (gameDir), else the paks. A file the mod has only in another
+        /// version (RT) can't be drawn: throws, so the original is never drawn by mistake.</summary>
+        private static byte[] GameFile(string root, string gameDir, GamePaks paks, string virt, string prefix = "")
+        {
+            string ext = virt.Substring(virt.LastIndexOf('.') + 1).ToLowerInvariant();
+            if (!NonRtVersion.TryGetValue(ext, out var ver)) return null;
+            string rel = (prefix + virt + "." + ver).Replace('/', Path.DirectorySeparatorChar);
+            if (root != null)
+            {
+                string f = Path.Combine(root, "natives", "x64", rel);
+                if (File.Exists(f)) return File.ReadAllBytes(f);
+                string name = Path.GetFileName(prefix + virt) + ".";
+                foreach (var pl in Converter.Platforms)
+                {
+                    string dir = Path.GetDirectoryName(Path.Combine(root, "natives", pl, (prefix + virt).Replace('/', Path.DirectorySeparatorChar)));
+                    if (Directory.Exists(dir) && Directory.EnumerateFiles(dir, name + "*").Any())
+                        throw new NotSupportedException("the mod has " + virt + " only for the RT build");
+                }
+            }
+            if (gameDir == null) return null;
+            string loose = Path.Combine(gameDir, "natives", "x64", rel);
+            if (File.Exists(loose)) return File.ReadAllBytes(loose);
+            return paks?.Read("natives/x64/" + (prefix + virt + "." + ver).ToLowerInvariant());
+        }
+
+        private static RenderPart DrawPart(string root, string gameDir, GamePaks paks, string mdf, string mesh)
+        {
+            if (mdf == null || mesh == null) return null;
+            var mdfB = GameFile(root, gameDir, paks, mdf);
+            var meshB = GameFile(root, gameDir, paks, mesh);
+            if (mdfB == null || meshB == null || Mdf2.IsRT(mdfB)) return null;
+            // textures: the streaming copy (full size) first; the mod's, then the game's
+            return new RenderPart
+            {
+                Mdf = mdfB, Mesh = meshB,
+                Texture = t => GameFile(root, null, null, t, "streaming/") ?? GameFile(root, null, null, t)
+                    ?? GameFile(null, gameDir, paks, t, "streaming/") ?? GameFile(null, gameDir, paks, t),
+            };
+        }
+
+        /// <summary>Draws every body of the mod (characters with a thumbnail pose) with the face and hair it is worn
+        /// with in game: the same mod's (same option first), else the game's for the costume it is shown in.</summary>
+        private static void DrawPictures(Plan plan, List<KeyValuePair<PlanOption, ConvertReport>> reports)
+        {
+            var paks = Converter.Paks(plan.GameDir);
+            foreach (var kv in reports)
+                foreach (var body in kv.Value.Outfits.Where(o => o.Part == "body" && o.Variants != null))
+                {
+                    var pose = OutfitRender.Pose(body.Character);
+                    var po = kv.Key.Outfits.FirstOrDefault(x => x.Character == body.Character && x.Part == "body");
+                    if (pose == null || po == null) continue;
+                    try
+                    {
+                        var bv = body.Variants[body.Default];
+                        int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
+                        var first = DrawPart(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh);
+                        if (first == null) continue;
+                        var parts = new List<RenderPart> { first };
+                        var table = Costumes.Table(paks, plan.GameDir, body.Group);
+                        foreach (var p in new[] { "face", "hair" })
+                        {
+                            var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
+                                .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null)
+                                    .Select(o => new { r.Key.Root, O = o }))
+                                .FirstOrDefault();
+                            RenderPart rp = null;
+                            if (mine != null)
+                            {
+                                var v = mine.O.Variants.FirstOrDefault(x => x.Costumes.Contains(costume)) ?? mine.O.Variants[mine.O.Default];
+                                rp = DrawPart(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh);
+                            }
+                            else if (table.TryGetValue(costume, out var cps) && cps.TryGetValue(p, out var cp))
+                                rp = DrawPart(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
+                            if (rp != null) parts.Add(rp);
+                        }
+                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024);
+                        if (rgba == null) continue;
+                        if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
+                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + ".png");
+                        OutfitRender.SavePng(rgba, 1024, 1024, file);
+                        po.Drawn = file;
+                    }
+                    catch { /* this outfit can't be drawn (RT-only files, unknown format): placeholder */ }
+                }
         }
 
         private static ConvertReport ConvertOption(string game, string root, string outRoot, string slug, string name, ConvertOptions o) =>
@@ -347,7 +462,8 @@ namespace CustomOutfits
                 {
                     var names = new Dictionary<string, string>();
                     foreach (var o in opt.Outfits) names[o.Character + "|" + o.Part] = (string.IsNullOrWhiteSpace(o.Name) ? opt.Name : o.Name).Trim();
-                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, GameDir = plan.GameDir, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))) });
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, GameDir = plan.GameDir, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? opt.Screenshot ?? MainOption(plan)?.Screenshot, ThumbnailForced = plan.CustomPicture != null,
+                        Drawn = opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);
                 }
@@ -358,7 +474,7 @@ namespace CustomOutfits
                 {
                     "name=" + plan.PackageName,
                     "version=" + (string.IsNullOrEmpty(first.Version) ? "1.0" : first.Version),
-                    "description=Converted for the Custom Outfit System: adds the outfits without replacing any game file. Original mod: " + plan.BaseName,
+                    "description=Converted for Wardrobe: adds the outfits without replacing any game file. Original mod: " + plan.BaseName,
                     "author=" + (string.IsNullOrEmpty(first.Author) ? "unknown" : first.Author),
                     "category=" + FluffyCategory(plan, first),
                 };
@@ -419,6 +535,7 @@ namespace CustomOutfits
         public static void Cleanup(Plan plan)
         {
             if (plan?.Extracted != null && plan.Extracted.Contains("CustomOutfitsConverter")) TryDelete(plan.Extracted);
+            if (plan?.DrawDir != null && plan.DrawDir.Contains("CustomOutfitsConverter")) TryDelete(plan.DrawDir);
         }
 
         private static void TryDelete(string dir)

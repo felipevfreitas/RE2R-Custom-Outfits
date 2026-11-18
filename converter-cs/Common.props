@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
+    <!-- 64-bit when Windows is: drawing the thumbnail decodes big textures -->
+    <Prefer32Bit>false</Prefer32Bit>
     <RootNamespace>CustomOutfits</RootNamespace>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
@@ -10,6 +12,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Lib\*.cs" Link="Lib\%(Filename)%(Extension)" />
+    <!-- thumbnail poses (made in Blender, research/render/poses): Lib/Poses/<character>.json -->
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Lib\Poses\*.json" LogicalName="pose.%(Filename)" />
   </ItemGroup>
   <ItemGroup>
     <!-- 0.50.7: fixes the "zip slip" flaw (GHSA-6c8g-7p36-r338) of versions < 0.48; includes zstd -->
@@ -22,5 +26,6 @@
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Drawing" />
   </ItemGroup>
 </Project>

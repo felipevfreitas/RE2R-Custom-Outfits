@@ -1,22 +1,22 @@
-# Custom Outfits Converter
+# Wardrobe Converter
 
 A Windows program that converts **Resident Evil 2 Remake** and **Resident Evil 3 Remake** skin mods so they no longer replace any costume.
 
-Skin mods normally put their files on top of a costume's files, so they replace that costume, and two mods for the same costume can't be installed together. The converter moves a mod's files to a folder of their own and describes them for the **Custom Outfits** mod (a REFramework script), which applies them in game. Nothing is replaced, and skins made for DLC costumes can be worn over the costumes you already have.
+Skin mods normally put their files on top of a costume's files, so they replace that costume, and two mods for the same costume can't be installed together. The converter moves a mod's files to a folder of their own and describes them for the **Wardrobe** mod (a REFramework script), which applies them in game. Nothing is replaced, and skins made for DLC costumes can be worn over the costumes you already have.
 
-The Custom Outfits mod itself is distributed on Nexus Mods (one page per game). This repository only contains the converter.
+The Wardrobe mod itself is distributed on Nexus Mods (one page per game). This repository only contains the converter.
 
 Downloads are on the [Releases](../../releases) page.
 
 ## Using the converter
 
-Run `Custom-Outfits-Converter.exe` (no install needed; .NET Framework 4.8 is already part of Windows 10/11).
+Run `Wardrobe-Converter.exe` (no install needed; .NET Framework 4.8 is already part of Windows 10/11).
 
 1. Drag one or more skin mods (`.zip`, `.rar`, `.7z` or a folder) onto the window.
-2. Check the outfit names.
+2. Check the outfit names and the picture the outfit gets in the game's Costumes menu (RE2, Leon and Claire). **Choose image…** uses another image; **Use default** goes back.
 3. Save. Each mod becomes a `.zip` ready for Fluffy Mod Manager.
 
-The game is recognized from the mod's files. The converter needs that game installed: it reads some original files (materials a mod doesn't ship, the costume tables) from the game's `.pak` files. The game folder is found automatically through Steam; for RE2 it can also be picked by hand.
+The game is recognized from the mod's files. The converter needs that game installed: it reads some original files (materials a mod doesn't ship, the costume tables) from the game's `.pak` files. Only the game the mod is for is needed (you can convert RE3 mods without having RE2, and the reverse). Its folder is found automatically through Steam; if it isn't, the converter asks for it. Both folders can be changed with the "Game folders" links on the start screen.
 
 ### What the converter does
 
@@ -25,6 +25,7 @@ The game is recognized from the mod's files. The converter needs that game insta
 - Works out which costume, body, face or hair each file belongs to, and the story stage it is used in (dirty, injured, without jacket...).
 - Writes one JSON per outfit part in `reframework/data/CustomOutfits/outfits/`, which the script reads.
 - Copies new master materials and high-resolution (`streaming/`) textures the mod ships, and warns when a material needs files that neither the mod nor the game has.
+- Makes the picture for the game's Costumes menu (`.tex`): the mod's own costume-menu picture, else its image, else one drawn from the outfit itself (a small software renderer: the body, face and hair in a pose made in Blender, with the mod's textures; Claire for now).
 - Writes `modinfo.ini` (name, author, version, screenshot, Fluffy category) and the final `.zip`.
 
 The original mod is never modified unless you choose **Save over original**.
@@ -39,7 +40,7 @@ cd RE2R-Custom-Outfits/converter-cs/App
 dotnet build -c Release
 ```
 
-The program is created at `converter-cs/App/bin/Release/net48/Custom-Outfits-Converter.exe`. It is a single file: [Costura.Fody](https://github.com/Fody/Costura) embeds the libraries into the `.exe`.
+The program is created at `converter-cs/App/bin/Release/net48/Wardrobe-Converter.exe`. It is a single file: [Costura.Fody](https://github.com/Fody/Costura) embeds the libraries into the `.exe`.
 
 `converter-cs/Cli` is a small command-line version used for testing (`co-cli analyze|convert|build|re3tables`).
 

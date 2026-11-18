@@ -21,6 +21,7 @@ namespace CustomOutfits
         public List<int> Costumes = new List<int>();
         public List<KeyValuePair<string, List<int>>> Also; // other characters that use the same file
         internal int MinStage;
+        internal string SrcMesh; // mesh at its original path (the mod's file there, else the game's): to draw the outfit
 
         public JObj ToJson()
         {
@@ -53,6 +54,9 @@ namespace CustomOutfits
         public List<string> Families = new List<string>();
         public List<string> Also = new List<string>();
         public List<string> VariantLabels = new List<string>();
+        internal string Group;
+        internal List<Variant> Variants;
+        internal int Default;
     }
 
     public sealed class ConvertReport
@@ -69,6 +73,9 @@ namespace CustomOutfits
         public Dictionary<string, string> Names = new Dictionary<string, string>(); // "character|part" -> name
         public string GameDir;
         public string Package; // id of the converted package: face/hair of the same mod follow its body in game
+        public string Thumbnail; // image of the mod (modinfo screenshot): body thumbnail in the game's costume menu
+        public bool ThumbnailForced; // Thumbnail was chosen by the user: used even if the mod has a costume-menu picture
+        public Dictionary<string, string> Drawn; // character -> picture drawn from the outfit (PNG with transparency), when the mod has no image
     }
 
     public static class Converter
@@ -316,6 +323,7 @@ namespace CustomOutfits
                     }
                     string chain = main.FirstOrDefault(f => Regex.IsMatch(f, $"^{esc}\\.chain\\.\\d+$", RegexOptions.IgnoreCase));
                     // face: ComputeSkinning uses <base>_blend.mesh (expressions); if the mod ships one, use it
+                    string srcMesh = modMesh != null ? $"{virtGroup}/{dir}/{bas}.mesh" : parentMesh != null ? $"{virtGroup}/{parentDir}/{parentBase}.mesh" : mesh;
                     string meshDir = modMesh != null ? dir : parentMesh != null ? parentDir : null;
                     string meshBase = modMesh != null ? bas : parentBase;
                     string blend = meshDir != null ? Has(meshDir, $"^{Regex.Escape(meshBase)}_blend\\.mesh\\.\\d+$") : null;
@@ -326,6 +334,7 @@ namespace CustomOutfits
                         Replaces = $"{virtGroup}/{dir}/{bas}.mdf2".ToLowerInvariant(), // original mdf2 that this variant replaces
                         Mdf = $"{newVirtBase}/{dir}/{bas}.mdf2".ToLowerInvariant(),
                         Mesh = mesh?.ToLowerInvariant(),
+                        SrcMesh = srcMesh.ToLowerInvariant(),
                         SkinMesh = blend != null ? $"{newVirtBase}/{meshDir}/{StripVer(PosixBase(blend))}".ToLowerInvariant() : null,
                         Chain = chain != null ? $"{newVirtBase}/{StripVer(chain)}".ToLowerInvariant() : null,
                         Textures = rewritten.SelectMany(m => CustomTextures(m.Buf)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
@@ -399,6 +408,53 @@ namespace CustomOutfits
                             if (perCostume != null) cp.Set(m.Key.ToString(), perCostume);
                         }
                         if (cp.Count > 0) entry.Set("costume_parts", cp);
+                        // thumbnail for the game's costume menu: the mod's image as .tex, in each build the mod is for
+                        // (x64 = DX11 .tex.10, stm = RT .tex.34); without it the script shows a placeholder
+                        // 1st choice: the costume-menu picture the mod itself brings (it replaces the game's:
+                        // sectionroot/ui/ui0600/tex/ui0601_<character>_<costume>_iam.tex; shown whole, like the game)
+                        var menuPic = dry || opts.ThumbnailForced ? null : MenuPicture(modRoot, character, families, variants);
+                        if (menuPic != null)
+                        {
+                            int tw = 0, th = 0;
+                            foreach (var (plat, file) in menuPic)
+                            {
+                                string ver = Regex.Match(file, @"\.tex\.(\d+)$").Groups[1].Value;
+                                string f = OsPath(outRoot, $"natives/{plat}/{newVirtBase}/thumbnail.tex.{ver}");
+                                Directory.CreateDirectory(Path.GetDirectoryName(f));
+                                File.Copy(file, f, true);
+                                var hd = new byte[12];
+                                using (var fs = File.OpenRead(file)) fs.Read(hd, 0, 12);
+                                tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                            }
+                            entry.Set("thumbnail", newVirtBase + "/thumbnail.tex").Set("thumbnail_size", new List<int> { tw, th })
+                                .Set("thumbnail_full", true);
+                        }
+                        else if (!dry && opts.Thumbnail != null)
+                        {
+                            int tw = 0, th = 0;
+                            bool any = false;
+                            foreach (var pl in plats)
+                            {
+                                int ver = pl == "stm" ? 34 : 10;
+                                string f = OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumbnail.tex.{ver}");
+                                if (Tex.WriteThumbnail(opts.Thumbnail, f, ver, out tw, out th)) any = true;
+                            }
+                            if (any) entry.Set("thumbnail", newVirtBase + "/thumbnail.tex").Set("thumbnail_size", new List<int> { tw, th });
+                            else report.Warnings.Add("the mod image could not be read: the game menu shows a placeholder");
+                        }
+                        // no image in the mod: the picture drawn from the outfit (transparent background, shown whole)
+                        else if (!dry && opts.Drawn != null && opts.Drawn.TryGetValue(character, out var drawn) && File.Exists(drawn))
+                        {
+                            int tw = 0, th = 0;
+                            bool any = false;
+                            foreach (var pl in plats)
+                            {
+                                int ver = pl == "stm" ? 34 : 10;
+                                string f = OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumbnail.tex.{ver}");
+                                if (Tex.WriteThumbnail(drawn, f, ver, out tw, out th, 1024, true)) any = true;
+                            }
+                            if (any) entry.Set("thumbnail", newVirtBase + "/thumbnail.tex").Set("thumbnail_size", new List<int> { tw, th }).Set("thumbnail_full", true);
+                        }
                     }
                     report.Outfits.Add(new OutfitInfo
                     {
@@ -406,11 +462,43 @@ namespace CustomOutfits
                         Families = families.ToList(),
                         Also = variants.Where(v => v.Also != null).SelectMany(v => v.Also.Select(a => a.Key)).Distinct().ToList(),
                         VariantLabels = variants.Select(v => v.Label).ToList(),
+                        Group = group, Variants = variants, Default = def,
                     });
                     if (!dry) File.WriteAllText(Path.Combine(jsonDir, id + ".json"), Json.Stringify(entry), new UTF8Encoding(false));
                 }
             }
             return report;
+        }
+
+        // Character code in the costume-menu picture names (ui0601_<code>_<costume>): only Leon and Claire have them.
+        private static readonly Dictionary<string, string> MenuPictureChar = new Dictionary<string, string> { ["leon"] = "00", ["claire"] = "01" };
+
+        /// <summary>The costume-menu picture the mod brings for the costume its game-menu entry stands for:
+        /// normal outfit = costume 0 (else 1-4), alternative = 5 (else 6-9), extra = the costume it replaces.
+        /// One file per platform folder (x64/stm), or null.</summary>
+        private static List<(string Plat, string File)> MenuPicture(string modRoot, string character, ICollection<string> families, List<Variant> variants)
+        {
+            if (!MenuPictureChar.TryGetValue(character, out var code)) return null;
+            var order = new List<int>();
+            if (families.Contains("normal")) order.AddRange(new[] { 0, 1, 2, 3, 4 });
+            else if (families.Contains("alt")) order.AddRange(new[] { 5, 6, 7, 8, 9 });
+            else order.AddRange(variants.SelectMany(v => v.Direct).Distinct().OrderBy(c => c));
+            var found = new Dictionary<int, List<(string, string)>>();
+            foreach (var pl in Platforms)
+            {
+                string dir = OsPath(modRoot, $"natives/{pl}/sectionroot/ui/ui0600/tex");
+                if (!Directory.Exists(dir)) continue;
+                foreach (var f in Directory.GetFiles(dir))
+                {
+                    var m = Regex.Match(Path.GetFileName(f), $@"^ui0601_{code}_(\d\d)_iam\.tex\.\d+$", RegexOptions.IgnoreCase);
+                    if (!m.Success) continue;
+                    int c = int.Parse(m.Groups[1].Value);
+                    if (!found.TryGetValue(c, out var l)) found[c] = l = new List<(string, string)>();
+                    l.Add((pl, f));
+                }
+            }
+            foreach (int c in order) if (found.TryGetValue(c, out var files)) return files;
+            return null;
         }
 
         // Decides which game costumes each variant is used in:

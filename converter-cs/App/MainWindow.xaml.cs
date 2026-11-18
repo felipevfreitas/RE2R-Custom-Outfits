@@ -86,6 +86,67 @@ namespace CustomOutfits
         public int OutfitCount { get; }
         public Visibility RemoveVisibility { get; }
         public Visibility WarningsVisibility => Plan.Warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // picture in the game's costume menu (RE2, Leon/Claire outfits): the user's image, else the mod's own
+        // costume-menu picture, else the mod's screenshot, else one drawn from the outfit, else a placeholder
+        private string Screenshot => Plan.Options.Select(o => o.Screenshot).FirstOrDefault(s => s != null);
+        private string Drawn => (Core.MainOption(Plan)?.Outfits ?? new List<PlanOutfit>()).Concat(Plan.Options.SelectMany(o => o.Outfits))
+            .Select(o => o.Drawn).FirstOrDefault(d => d != null && File.Exists(d));
+        public Visibility PictureVisibility =>
+            Plan.Game == "re2" && Plan.Options.Any(o => o.Outfits.Any(x => x.Part == "body" && (x.Character == "claire" || x.Character == "leon")))
+                ? Visibility.Visible : Visibility.Collapsed;
+        public string PictureText =>
+            Plan.CustomPicture != null ? "Your image: " + Path.GetFileName(Plan.CustomPicture)
+            : Plan.HasMenuPicture ? "The mod's own costume menu picture."
+            : Screenshot != null ? "The mod's image."
+            : Drawn != null ? "The mod has no image, so this picture was drawn from the outfit."
+            : "No image in this mod: the game shows a placeholder. Take a screenshot in game and choose it here.";
+
+        private ImageSource _preview;
+        private bool _previewDone;
+        public ImageSource PicturePreview
+        {
+            get
+            {
+                if (_previewDone) return _preview;
+                _previewDone = true;
+                if (Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile);
+                string f = Plan.CustomPicture ?? Screenshot ?? Drawn;
+                if (f == null || !File.Exists(f)) return null;
+                try
+                {
+                    var b = new System.Windows.Media.Imaging.BitmapImage();
+                    b.BeginInit();
+                    b.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; // don't keep the file open
+                    b.DecodePixelWidth = 240;
+                    b.UriSource = new Uri(f);
+                    b.EndInit();
+                    b.Freeze();
+                    return _preview = b;
+                }
+                catch { return null; }
+            }
+        }
+
+        // the mod's costume-menu picture (.tex) as an image
+        private static ImageSource TexImage(string file)
+        {
+            try
+            {
+                var rgba = TexDecode.Mip0(File.ReadAllBytes(file), out int w, out int h, out _);
+                var bgra = new byte[rgba.Length];
+                for (int i = 0; i < rgba.Length; i += 4)
+                {
+                    bgra[i] = rgba[i + 2]; bgra[i + 1] = rgba[i + 1]; bgra[i + 2] = rgba[i]; bgra[i + 3] = rgba[i + 3];
+                }
+                var bmp = System.Windows.Media.Imaging.BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, bgra, w * 4);
+                bmp.Freeze();
+                return bmp;
+            }
+            catch { return null; }
+        }
+        public Visibility PreviewVisibility => PicturePreview != null ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility DefaultPictureVisibility => Plan.CustomPicture != null ? Visibility.Visible : Visibility.Collapsed;
         public string WarningsText => string.Join("\n", Plan.Warnings.Select(w => "• " + w));
     }
 
@@ -95,7 +156,6 @@ namespace CustomOutfits
         private static readonly string SettingsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RE2R Custom Outfits Converter");
         private static readonly string SettingsFile = Path.Combine(SettingsDir, "settings.txt");
 
-        private string _gameDir;
         private readonly List<Plan> _plans = new List<Plan>();
         private List<string> _lastOutputs = new List<string>();
         private readonly DispatcherTimer _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
@@ -174,49 +234,73 @@ namespace CustomOutfits
             _toastTimer.Start();
         }
 
-        // ------------------------------------------------------------ game folder
-        // The program reads original game files (materials the mod doesn't ship, story stages), so it
-        // needs the folder. Found automatically: only a discreet link. Not found: warning on the start screen.
+        // ------------------------------------------------------------ game folders
+        // The program reads original game files (materials the mod doesn't ship, story stages). Each mod says
+        // which game it is for, and only that game's folder is needed: the saved one, else found through Steam,
+        // else asked for when a mod of that game is opened. Nobody needs RE2 to convert RE3 mods (or the reverse).
+        private static readonly string[] Games = { "re2", "re3" };
+        private readonly Dictionary<string, string> _gameDirs = new Dictionary<string, string>();
+
+        // RE2 keeps the old settings file (updating keeps the saved folder)
+        private static string SettingsFileOf(string game) => game == "re2" ? SettingsFile : Path.Combine(SettingsDir, "settings-" + game + ".txt");
+
         private void LoadGameDir()
         {
-            try { if (File.Exists(SettingsFile)) _gameDir = File.ReadAllText(SettingsFile).Trim(); } catch { }
-            if (!Core.IsGameDir(_gameDir))
+            foreach (var g in Games)
             {
-                _gameDir = Core.DetectGameDir();
-                if (_gameDir != null) SaveGameDir();
+                string d = null;
+                try { if (File.Exists(SettingsFileOf(g))) d = File.ReadAllText(SettingsFileOf(g)).Trim(); } catch { }
+                _gameDirs[g] = Core.IsGameDir(d, g) ? d : null;
             }
             RenderGame();
         }
 
-        private void SaveGameDir()
+        /// <summary>The folder of a game: the saved one, else found through Steam (and saved), else null.</summary>
+        private string GameDir(string game)
         {
-            try { Directory.CreateDirectory(SettingsDir); File.WriteAllText(SettingsFile, _gameDir ?? ""); } catch { }
+            _gameDirs.TryGetValue(game, out var d);
+            if (Core.IsGameDir(d, game)) return d;
+            d = Core.DetectGameDir(game);
+            if (d != null) SaveGameDir(game, d);
+            return d;
+        }
+
+        private void SaveGameDir(string game, string dir)
+        {
+            _gameDirs[game] = dir;
+            try { Directory.CreateDirectory(SettingsDir); File.WriteAllText(SettingsFileOf(game), dir ?? ""); } catch { }
+            RenderGame();
         }
 
         private void RenderGame()
         {
-            bool ok = Core.IsGameDir(_gameDir);
-            GameMissing.Visibility = ok ? Visibility.Collapsed : Visibility.Visible;
-            GameLink.ToolTip = ok ? _gameDir + " (click to change)" : "Choose the Resident Evil 2 folder";
+            foreach (var (g, link) in new[] { ("re2", GameLink2), ("re3", GameLink3) })
+            {
+                _gameDirs.TryGetValue(g, out var d);
+                link.ToolTip = Core.IsGameDir(d, g) ? d + " (click to change)"
+                    : "Found automatically when a mod of this game is opened (Steam). Click to choose it yourself.";
+            }
         }
 
-        private bool ChooseGame()
+        private bool ChooseGame(string game)
         {
-            string dir = FolderPicker.Pick(this, "Resident Evil 2 game folder (with re2.exe)");
+            string name = Core.GameNames[game];
+            string dir = FolderPicker.Pick(this, $"{name} game folder (with {game}.exe)");
             if (dir == null) return false;
-            if (!Core.IsGameDir(dir))
+            if (!Core.IsGameDir(dir, game))
             {
-                ConfirmDialog.Show(this, "Not the game folder", "This folder does not have re2.exe and re_chunk_000.pak.",
-                    "Choose the Resident Evil 2 folder inside Steam\\steamapps\\common.", "OK", null);
+                ConfirmDialog.Show(this, "Not the game folder", $"This folder does not have {game}.exe and re_chunk_000.pak.",
+                    $"Choose the {name} folder inside Steam\\steamapps\\common.", "OK", null);
                 return false;
             }
-            _gameDir = dir;
-            SaveGameDir();
-            RenderGame();
+            SaveGameDir(game, dir);
             return true;
         }
 
-        private void ChooseGame_Click(object sender, RoutedEventArgs e) => ChooseGame();
+        private void ChooseGame_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkContentElement)?.Tag is string game) ChooseGame(game);
+        }
 
         // ------------------------------------------------------------ open mods
         private void OnDragOver(object sender, DragEventArgs e)
@@ -281,20 +365,28 @@ namespace CustomOutfits
         {
             var list = inputs.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
             if (list.Count == 0) return;
-            if (!Core.IsGameDir(_gameDir))
-            {
-                ShowToast("Choose the Resident Evil 2 game folder first.");
-                if (!ChooseGame()) return;
-            }
             if (!append) ClearPlans();
             var failed = new List<string>();
-            string game = _gameDir;
             for (int i = 0; i < list.Count; i++)
             {
                 string input = list[i];
                 if (_plans.Any(p => string.Equals(p.Input, input, StringComparison.OrdinalIgnoreCase))) continue; // already loaded
-                SetBusy(true, list.Count > 1 ? $"Reading mod {i + 1} of {list.Count}..." : "Reading the mod...");
-                try { _plans.Add(await Task.Run(() => Core.Analyze(input, game))); }
+                SetBusy(true, list.Count > 1 ? $"Reading mod {i + 1} of {list.Count}..." : "Reading the mod... (mods without an image get a picture drawn, a few seconds)");
+                // the folders known now (found through Steam the first time); the mod's game decides which one is used
+                var dirs = Games.ToDictionary(g => g, GameDir);
+                try { _plans.Add(await Task.Run(() => Core.Analyze(input, g => dirs.TryGetValue(g, out var d) ? d : null))); }
+                catch (GameFolderMissingException gm)
+                {
+                    // a mod of a game whose folder is unknown: ask for that folder and read the mod again
+                    SetBusy(false);
+                    string name = Core.GameNames[gm.Game];
+                    bool pick = ConfirmDialog.Show(this, name + " not found",
+                        $"{Path.GetFileName(input.TrimEnd('\\', '/'))} is a {name} mod.",
+                        $"The converter reads some original files from the game. Choose the {name} folder (the one with {gm.Game}.exe).",
+                        "Choose folder", "Skip this mod");
+                    if (pick && ChooseGame(gm.Game)) { i--; continue; }
+                    failed.Add(Path.GetFileName(input.TrimEnd('\\', '/')) + ": " + gm.Message);
+                }
                 catch (Exception ex) { failed.Add(Path.GetFileName(input.TrimEnd('\\', '/')) + ": " + ex.Message); }
             }
             SetBusy(false);
@@ -326,6 +418,25 @@ namespace CustomOutfits
             }
         }
 
+        private void ChoosePicture_Click(object sender, RoutedEventArgs e)
+        {
+            if (!((sender as Button)?.Tag is ModVM vm)) return;
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Picture for the game's costume menu",
+                Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            if (Tex.LoadRgba(dlg.FileName, 64, out _, out _) == null) { ShowToast("This image could not be read."); return; }
+            vm.Plan.CustomPicture = dlg.FileName;
+            RenderPlans();
+        }
+
+        private void DefaultPicture_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.Tag is ModVM vm) { vm.Plan.CustomPicture = null; RenderPlans(); }
+        }
+
         private void StartOver_Click(object sender, RoutedEventArgs e)
         {
             ClearPlans();
@@ -336,13 +447,13 @@ namespace CustomOutfits
         private static string SafeName(string s)
         {
             foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c.ToString(), "");
-            return s.Trim().Length > 0 ? s.Trim() : "Custom Outfits";
+            return s.Trim().Length > 0 ? s.Trim() : "Wardrobe";
         }
 
         private void NormalizeNames()
         {
             foreach (var p in _plans)
-                if (string.IsNullOrWhiteSpace(p.PackageName)) p.PackageName = p.BaseName + " (Custom Outfits)";
+                if (string.IsNullOrWhiteSpace(p.PackageName)) p.PackageName = p.BaseName + " (Wardrobe)";
         }
 
         private async void SaveNew_Click(object sender, RoutedEventArgs e)

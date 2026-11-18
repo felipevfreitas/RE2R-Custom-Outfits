@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Custom Outfits Converter (RE2 and RE3): WPF program (.NET Framework 4.8, included in Windows 10/11).
+  <!-- Wardrobe Converter (RE2 and RE3): WPF program (.NET Framework 4.8, included in Windows 10/11).
        Costura embeds the libraries in the .exe: a single file. -->
   <Import Project="..\Common.props" />
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
-    <AssemblyName>Custom-Outfits-Converter</AssemblyName>
-    <Product>Custom Outfits Converter</Product>
-    <AssemblyTitle>Custom Outfits Converter</AssemblyTitle>
-    <Version>1.2.2</Version>
+    <AssemblyName>Wardrobe-Converter</AssemblyName>
+    <Product>Wardrobe Converter</Product>
+    <AssemblyTitle>Wardrobe Converter</AssemblyTitle>
+    <Version>1.3.0</Version>
     <Description>Converts Resident Evil 2 and 3 Remake skin mods so they no longer replace the original outfits.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>none</DebugType>
@@ -16,10 +16,11 @@
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <!-- window icon and logo; logo-source.webp is only the original and is not built into the .exe -->
+    <!-- window icon and logo; logo-source.png (current) and .webp (old) are only originals, not built into the .exe -->
     <Resource Include="Assets\app.ico" />
     <Resource Include="Assets\logo.png" />
     <None Remove="Assets\logo-source.webp" />
+    <None Remove="Assets\logo-source.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fody" Version="6.8.2" PrivateAssets="all" />
