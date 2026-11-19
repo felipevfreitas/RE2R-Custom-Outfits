@@ -110,7 +110,7 @@ namespace CustomOutfits
             {
                 if (_previewDone) return _preview;
                 _previewDone = true;
-                if (Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile);
+                if (Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile, Plan.Game == "re3");
                 string f = Plan.CustomPicture ?? Screenshot ?? Drawn;
                 if (f == null || !File.Exists(f)) return null;
                 try
@@ -129,11 +129,12 @@ namespace CustomOutfits
         }
 
         // the mod's costume-menu picture (.tex) as an image
-        private static ImageSource TexImage(string file)
+        private static ImageSource TexImage(string file, bool flatten = false)
         {
             try
             {
                 var rgba = TexDecode.Mip0(File.ReadAllBytes(file), out int w, out int h, out _);
+                if (flatten) Tex.FlattenOnBlack(rgba); // (the RE3 menu shows pictures opaque: this is how it looks there)
                 var bgra = new byte[rgba.Length];
                 for (int i = 0; i < rgba.Length; i += 4)
                 {

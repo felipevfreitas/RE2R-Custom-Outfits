@@ -180,7 +180,7 @@ namespace CustomOutfits
             List<ModFile> MenuPicture(string character, Variant v)
             {
                 if (character != "jill" || v == null) return null;
-                int c = v.Costumes.Count > 0 ? v.Costumes[0] : v.Direct.Count > 0 ? v.Direct[0] : 0;
+                int c = v.Direct.Count > 0 ? v.Direct[0] : v.Costumes.Count > 0 ? v.Costumes[0] : 0; // the costume whose files the mod replaces (S.T.A.R.S. = 3)
                 string idx = c == 3 ? "01" : c == 5 ? "02" : "00";
                 if (!byVirt.TryGetValue($"escape/ui/ui0600/tex/ui0601_00_{idx}_iam.tex", out var l)) return null;
                 l = l.Where(x => Regex.IsMatch(x.Rel, @"\.tex\.\d+$")).ToList();
@@ -417,16 +417,38 @@ namespace CustomOutfits
                         var menuPic = opts.ThumbnailForced ? null : MenuPicture(menu, variants[def]);
                         if (menuPic != null)
                         {
-                            foreach (var mp in menuPic)
+                            // the RE3 menu ignores transparency and shows the RGB under it (white in many mods' pictures):
+                            // the picture is flattened over black and written in every version of the game. Whatever can't
+                            // be decoded is copied as it is.
+                            bool flat = false;
+                            try
                             {
-                                string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
-                                string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + pv);
-                                Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                                File.Copy(src, dst, true);
-                                var hd = new byte[12];
-                                using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
-                                tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                                var first = menuPic[0];
+                                var rgba = TexDecode.Mip0(File.ReadAllBytes(Os(modRoot, first.Natives, first.Rel)), out int pw, out int ph, out _);
+                                if (Tex.Pow2(pw) == pw && Tex.Pow2(ph) == ph)
+                                {
+                                    Tex.FlattenOnBlack(rgba);
+                                    foreach (int ver in new[] { 190820018, 34 })
+                                    {
+                                        string dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + ver);
+                                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                        File.WriteAllBytes(dst, Tex.Build(rgba, pw, ph, ver, true));
+                                    }
+                                    tw = pw; th = ph; flat = true;
+                                }
                             }
+                            catch { flat = false; }
+                            if (!flat)
+                                foreach (var mp in menuPic)
+                                {
+                                    string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
+                                    string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + pv);
+                                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                    File.Copy(src, dst, true);
+                                    var hd = new byte[12];
+                                    using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
+                                    tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                                }
                             any = true; full = true;
                         }
                         else
