@@ -93,7 +93,15 @@ namespace CustomOutfits
             foreach (var kv in new[] { (0, "pl2800"), (7, "pl2800"), (8, "pl2810"), (9, "pl2820") })
                 Add(mirror, kv.Item1, "Mirror", P($"{kv.Item2}/mesh/{kv.Item2}.mesh", $"{kv.Item2}/mesh/{kv.Item2}.mdf2", $"{kv.Item2}/mesh/{kv.Item2}.mesh", claireChain), jFace, jHair);
 
-            return new List<Model> { jill, carlos, inf, dream, mirror };
+            // Jill of the opening cutscene (ev001_s00): a player prefab that carries its parts itself (body pl2900, face pl2901
+            // with a zombie material, hair pl2905), not costume parts
+            var intro = new Model { Id = "jill_intro", Menu = "jill", Group = "pl2900" };
+            var iBody = P("pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.mdf2", "pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.chain");
+            var iHair = P("pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.mdf2", "pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.chain");
+            Add(intro, 0, "Intro", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
+            Add(intro, 1, "Intro, zombie", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901_zombie.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
+
+            return new List<Model> { jill, carlos, inf, dream, mirror, intro };
         }
 
         public static readonly Dictionary<string, string> CharNames = new Dictionary<string, string>
@@ -452,7 +460,7 @@ namespace CustomOutfits
             // files of character folders that no costume of the game uses (e.g. figure-viewer materials)
             var used = new HashSet<string>(report.Units.SelectMany(u => new[] { u.V.Replaces }), StringComparer.OrdinalIgnoreCase);
             foreach (var k in byVirt.Keys.Where(k => k.StartsWith(PlayerRoot + "/") && k.EndsWith(".mdf2") && !k.EndsWith("_figure.mdf2") && !used.Contains(k)).OrderBy(k => k))
-                report.Warnings.Add($"{k.Substring(PlayerRoot.Length + 1)}: not used by any costume of the game, skipped");
+                report.Warnings.Add($"{k.Substring(PlayerRoot.Length + 1)}: " + (k.Contains("/pl2940/") ? "only used by the Extras model viewer, which is not supported, skipped" : "not used by any costume of the game, skipped"));
             return report;
         }
 
