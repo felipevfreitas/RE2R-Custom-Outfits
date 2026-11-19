@@ -99,8 +99,8 @@ namespace CustomOutfits
             var iBody = P("pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.mdf2", "pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.chain");
             var iHair = P("pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.mdf2", "pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.chain");
             Add(intro, 0, "Intro", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
-            // (the zombie face material of that actor, pl2901_zombie.mdf2, is not swapped: the script never wears it, and loading
-            // that material as a preload crashed the game while a save loaded, 2026-11-19)
+            // costume 1 = the zombie face material of that actor (a second face object, pl2901_Zombie): the script wears it too
+            Add(intro, 1, "Intro, zombie", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901_zombie.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
 
             return new List<Model> { jill, carlos, inf, dream, mirror, intro };
         }
@@ -465,10 +465,43 @@ namespace CustomOutfits
                 }
             }
 
-            // files of character folders that no costume of the game uses (e.g. figure-viewer materials)
-            var used = new HashSet<string>(report.Units.SelectMany(u => new[] { u.V.Replaces }), StringComparer.OrdinalIgnoreCase);
-            foreach (var k in byVirt.Keys.Where(k => k.StartsWith(PlayerRoot + "/") && k.EndsWith(".mdf2") && !k.EndsWith("_figure.mdf2") && !used.Contains(k)).OrderBy(k => k))
-                report.Warnings.Add($"{k.Substring(PlayerRoot.Length + 1)}: " + (k.Contains("/pl2940/") ? "only used by the Extras model viewer, which is not supported, skipped" : k.Contains("pl2901_zombie") ? "the zombie face of the opening cutscene is not swapped, skipped" : "not used by any costume of the game, skipped"));
+            // Character folders that no costume of the game uses (pl2940 is the Extras model viewer's model): the costume system
+            // can't swap them, so the mod's files are kept as plain replacements of those files (nothing else uses them), their
+            // textures remapped like the outfits' so the viewer shows the mod too. Loose mdf2 files of other folders that no
+            // costume uses are dead files (the game never loads them) and are left out silently.
+            var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in Models)
+                foreach (var cp in m.Table.Values.SelectMany(t => t.Values))
+                    foreach (var path in new[] { cp.Mesh, cp.Mdf, cp.Skin, cp.Chain })
+                        if (path != null && path.StartsWith(PlayerRoot + "/", StringComparison.OrdinalIgnoreCase))
+                            claimed.Add(path.Substring(PlayerRoot.Length + 1).Split('/')[0]);
+            Func<string, string> mapAny = p => Has(p.ToLowerInvariant()) && Regex.IsMatch(byVirt[p.ToLowerInvariant()][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)
+                && new FileInfo(Os(modRoot, byVirt[p.ToLowerInvariant()][0].Natives, byVirt[p.ToLowerInvariant()][0].Rel)).Length >= 1024
+                ? CustomOf("jill", p) : null;
+            var passed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in byVirt.Keys.Where(k => k.StartsWith(PlayerRoot + "/")).ToList())
+            {
+                string group = key.Substring(PlayerRoot.Length + 1).Split('/')[0];
+                if (!Regex.IsMatch(group, @"^pl\d{4}$") || claimed.Contains(group)) continue;
+                if (key.EndsWith(".mdf2"))
+                {
+                    // the material is rewritten (its textures point to the mod's copies) and written at its original path
+                    foreach (var f in byVirt[key])
+                    {
+                        var rewritten = Mdf2.RewriteTexturePaths(File.ReadAllBytes(Os(modRoot, f.Natives, f.Rel)), mapAny, out int ch);
+                        if (dry) continue;
+                        string dst = Os(outRoot, f.Natives.ToLowerInvariant(), f.Rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                        File.WriteAllBytes(dst, rewritten);
+                        foreach (var t in CustomTexturesOf(rewritten))
+                        {
+                            string orig = byVirt.Keys.FirstOrDefault(k => CustomOf("jill", k).Equals(t, StringComparison.OrdinalIgnoreCase));
+                            if (orig != null && passed.Add(orig)) CopyMod("jill", orig);
+                        }
+                    }
+                }
+                else if (passed.Add(key)) CopyTo(key, key); // meshes and the like, as they are
+            }
             return report;
         }
 
