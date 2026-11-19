@@ -59,6 +59,15 @@ namespace CustomOutfits.Cli
                         foreach (var w in r.Warnings) Console.WriteLine("WARNING: " + w);
                         return 0;
                     }
+                    case "paklock":
+                    {
+                        // paklock <game dir> <pak entry>: reads an entry, then checks that the pak can be opened exclusively (as Fluffy does)
+                        if (!File.Exists(args[1])) { var gp = Converter.Paks(args[1]); var data = gp.Read(args[2]); Console.WriteLine("read " + (data == null ? "nothing" : data.Length + " bytes")); }
+                        else { using (var tp = new Pak(args[1])) Console.WriteLine("opened a pak object (" + tp.Entries.Count + " entries)"); }
+                        foreach (var pk in File.Exists(args[1]) ? new[] { args[1] } : Directory.GetFiles(args[1], "re_chunk_000.pak"))
+                            using (new FileStream(pk, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) Console.WriteLine("exclusive open of " + Path.GetFileName(pk) + ": OK");
+                        return 0;
+                    }
                     case "re3tables":
                     {
                         // RE3 costume tables for the script: reframework/data/CustomOutfits/game/*.json

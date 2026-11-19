@@ -23,13 +23,13 @@ namespace CustomOutfits
     public sealed class Pak : IDisposable
     {
         public readonly string File;
-        private readonly FileStream _fs;
+        // (no stream is kept: the file is opened for each read and closed right after, so that other programs, such as Fluffy
+        // Mod Manager, which opens the pak exclusively to install a mod, are never locked out while the converter is open)
         public readonly Dictionary<string, PakEntry> Entries = new Dictionary<string, PakEntry>();
 
         public Pak(string file)
         {
             File = file;
-            _fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             var hdr = new byte[16];
             ReadExact(hdr, 0, 16, 0);
             if (Encoding.ASCII.GetString(hdr, 0, 4) != "KPKA") throw new InvalidDataException(file + ": not KPKA");
@@ -54,13 +54,13 @@ namespace CustomOutfits
 
         private void ReadExact(byte[] buf, int index, int count, long position)
         {
-            lock (_fs)
+            using (var fs = new FileStream(File, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
-                _fs.Position = position;
+                fs.Position = position;
                 int done = 0;
                 while (done < count)
                 {
-                    int n = _fs.Read(buf, index + done, count - done);
+                    int n = fs.Read(buf, index + done, count - done);
                     if (n <= 0) throw new EndOfStreamException(File);
                     done += n;
                 }
@@ -90,7 +90,7 @@ namespace CustomOutfits
             }
         }
 
-        public void Dispose() => _fs.Dispose();
+        public void Dispose() { }
     }
 
     /// <summary>Every pak of the game; newer patches take priority, DLCs last.</summary>
