@@ -465,43 +465,9 @@ namespace CustomOutfits
                 }
             }
 
-            // Character folders that no costume of the game uses (pl2940 is the Extras model viewer's model): the costume system
-            // can't swap them, so the mod's files are kept as plain replacements of those files (nothing else uses them), their
-            // textures remapped like the outfits' so the viewer shows the mod too. Loose mdf2 files of other folders that no
-            // costume uses are dead files (the game never loads them) and are left out silently.
-            var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var m in Models)
-                foreach (var cp in m.Table.Values.SelectMany(t => t.Values))
-                    foreach (var path in new[] { cp.Mesh, cp.Mdf, cp.Skin, cp.Chain })
-                        if (path != null && path.StartsWith(PlayerRoot + "/", StringComparison.OrdinalIgnoreCase))
-                            claimed.Add(path.Substring(PlayerRoot.Length + 1).Split('/')[0]);
-            Func<string, string> mapAny = p => Has(p.ToLowerInvariant()) && Regex.IsMatch(byVirt[p.ToLowerInvariant()][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)
-                && new FileInfo(Os(modRoot, byVirt[p.ToLowerInvariant()][0].Natives, byVirt[p.ToLowerInvariant()][0].Rel)).Length >= 1024
-                ? CustomOf("jill", p) : null;
-            var passed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var key in byVirt.Keys.Where(k => k.StartsWith(PlayerRoot + "/")).ToList())
-            {
-                string group = key.Substring(PlayerRoot.Length + 1).Split('/')[0];
-                if (!Regex.IsMatch(group, @"^pl\d{4}$") || claimed.Contains(group)) continue;
-                if (key.EndsWith(".mdf2"))
-                {
-                    // the material is rewritten (its textures point to the mod's copies) and written at its original path
-                    foreach (var f in byVirt[key])
-                    {
-                        var rewritten = Mdf2.RewriteTexturePaths(File.ReadAllBytes(Os(modRoot, f.Natives, f.Rel)), mapAny, out int ch);
-                        if (dry) continue;
-                        string dst = Os(outRoot, f.Natives.ToLowerInvariant(), f.Rel);
-                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                        File.WriteAllBytes(dst, rewritten);
-                        foreach (var t in CustomTexturesOf(rewritten))
-                        {
-                            string orig = byVirt.Keys.FirstOrDefault(k => CustomOf("jill", k).Equals(t, StringComparison.OrdinalIgnoreCase));
-                            if (orig != null && passed.Add(orig)) CopyMod("jill", orig);
-                        }
-                    }
-                }
-                else if (passed.Add(key)) CopyTo(key, key); // meshes and the like, as they are
-            }
+            // Files of character folders that no costume of the game uses (pl2940 is the Extras model viewer's model, pl2098 and the
+            // like are dead materials) are left out on purpose: the costume system can't swap them, and keeping them would mean replacing
+            // game files, which Wardrobe never does (two converted mods would overwrite each other's copy, Fluffy refuses it).
             return report;
         }
 
