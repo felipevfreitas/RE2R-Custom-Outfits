@@ -478,7 +478,7 @@ namespace CustomOutfits
                         outp[o + 3] = (byte)(255 * al / (SS * SS));
                     }
                 }
-            if (opt.Re3) { FillHoles(outp, W, H, Math.Max(3, W / 72)); OnBlackWithGlow(outp, W, H); }
+            if (opt.Re3) { FillHoles(outp, W, H, Math.Max(3, W / 72)); GlowAround(outp, W, H); }
             return outp;
         }
 
@@ -512,8 +512,9 @@ namespace CustomOutfits
                 }
         }
 
-        // RE3 menu pictures are opaque: the figure over black, with a soft cool glow around it like the game's pictures
-        private static void OnBlackWithGlow(byte[] px, int w, int h)
+        // RE3 menu pictures keep their transparency: the figure, and around it a soft glow that is semi-transparent white-blue
+        // (alpha = how much glow), like the game's own pictures (RGB under full transparency = 0)
+        private static void GlowAround(byte[] px, int w, int h)
         {
             var a = new float[w * h];
             for (int i = 0; i < a.Length; i++) a[i] = px[i * 4 + 3] / 255f;
@@ -542,13 +543,15 @@ namespace CustomOutfits
                     }
                 }
             }
+            double[] gc = { 235, 240, 255 };
             for (int i = 0; i < w * h; i++)
             {
                 int o = i * 4;
-                double cov = px[o + 3] / 255.0, glow = Math.Min(1.0, a[i] * 1.0);
-                double[] g = { 235 * glow, 240 * glow, 255 * glow };
-                for (int k = 0; k < 3; k++) px[o + k] = (byte)Math.Min(255, px[o + k] * cov + g[k] * (1 - cov));
-                px[o + 3] = 255;
+                double cov = px[o + 3] / 255.0, glow = Math.Min(1.0, a[i] * 1.0) * 0.85;
+                double al = cov + (1 - cov) * glow; // the figure over the glow
+                if (al <= 0.003) { px[o] = px[o + 1] = px[o + 2] = 0; px[o + 3] = 0; continue; }
+                for (int k = 0; k < 3; k++) px[o + k] = (byte)Math.Min(255, (px[o + k] * cov + gc[k] * glow * (1 - cov)) / al);
+                px[o + 3] = (byte)Math.Min(255, al * 255);
             }
         }
 

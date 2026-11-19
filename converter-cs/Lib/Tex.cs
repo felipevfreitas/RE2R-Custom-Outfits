@@ -22,18 +22,6 @@ namespace CustomOutfits
         public const int FormatBc1Srgb = 72; // DXGI_FORMAT_BC1_UNORM_SRGB (opaque pictures)
         public const int FormatBc3Srgb = 78; // DXGI_FORMAT_BC3_UNORM_SRGB (with transparency: the placeholder)
 
-        /// <summary>RGBA over black, opaque: the RE3 menu ignores transparency and shows whatever RGB sits under it
-        /// (white in many mods' pictures).</summary>
-        public static void FlattenOnBlack(byte[] rgba)
-        {
-            for (int i = 0; i < rgba.Length; i += 4)
-            {
-                int a = rgba[i + 3];
-                rgba[i] = (byte)(rgba[i] * a / 255); rgba[i + 1] = (byte)(rgba[i + 1] * a / 255); rgba[i + 2] = (byte)(rgba[i + 2] * a / 255);
-                rgba[i + 3] = 255;
-            }
-        }
-
         public static int Pow2(int n) { int p = 4; while (p < n) p <<= 1; return p; }
 
         /// <summary>rgba: w x h pixels, both powers of two (at least 4).

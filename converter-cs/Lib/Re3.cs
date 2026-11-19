@@ -99,7 +99,8 @@ namespace CustomOutfits
             var iBody = P("pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.mdf2", "pl2900/mesh/pl2900.mesh", "pl2900/mesh/pl2900.chain");
             var iHair = P("pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.mdf2", "pl2900/pl2905/mesh/pl2905.mesh", "pl2900/pl2905/mesh/pl2905.chain");
             Add(intro, 0, "Intro", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
-            Add(intro, 1, "Intro, zombie", iBody, P("pl2900/pl2901/mesh/pl2901.mesh", "pl2900/pl2901/mesh/pl2901_zombie.mdf2", "pl2900/pl2901/mesh/pl2901_blend.mesh", null), iHair);
+            // (the zombie face material of that actor, pl2901_zombie.mdf2, is not swapped: the script never wears it, and loading
+            // that material as a preload crashed the game while a save loaded, 2026-11-19)
 
             return new List<Model> { jill, carlos, inf, dream, mirror, intro };
         }
@@ -227,7 +228,12 @@ namespace CustomOutfits
             foreach (var menu in Models.Select(m => m.Menu).Distinct())
             {
                 // textures of the mod (any folder) -> custom path; used by every material of this character
+                // (a texture of the mod that is only a tiny placeholder, like the 104-byte 8x8 "blank" face_dirt some mods ship to
+                // remove the dirt, is left out: the material keeps the game's own texture. Those placeholders crashed the game when
+                // loaded as a resource of their own.)
+                bool IsPlaceholder(ModFile mf) => new FileInfo(Os(modRoot, mf.Natives, mf.Rel)).Length < 1024;
                 Func<string, string> mapFn = p => Has(p.ToLowerInvariant()) && Regex.IsMatch(byVirt[p.ToLowerInvariant()][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)
+                    && !byVirt[p.ToLowerInvariant()].All(IsPlaceholder)
                     ? CustomOf(menu, p) : null;
 
                 var byPart = new Dictionary<string, List<Variant>>();
@@ -417,38 +423,18 @@ namespace CustomOutfits
                         var menuPic = opts.ThumbnailForced ? null : MenuPicture(menu, variants[def]);
                         if (menuPic != null)
                         {
-                            // the RE3 menu ignores transparency and shows the RGB under it (white in many mods' pictures):
-                            // the picture is flattened over black and written in every version of the game. Whatever can't
-                            // be decoded is copied as it is.
-                            bool flat = false;
-                            try
+                            // copied as it is: it is in the game's own format, transparency included (the game's pictures are mostly
+                            // alpha 0 with a soft glow, and the menu blends them over its background)
+                            foreach (var mp in menuPic)
                             {
-                                var first = menuPic[0];
-                                var rgba = TexDecode.Mip0(File.ReadAllBytes(Os(modRoot, first.Natives, first.Rel)), out int pw, out int ph, out _);
-                                if (Tex.Pow2(pw) == pw && Tex.Pow2(ph) == ph)
-                                {
-                                    Tex.FlattenOnBlack(rgba);
-                                    foreach (int ver in new[] { 190820018, 34 })
-                                    {
-                                        string dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + ver);
-                                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                                        File.WriteAllBytes(dst, Tex.Build(rgba, pw, ph, ver, true));
-                                    }
-                                    tw = pw; th = ph; flat = true;
-                                }
+                                string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
+                                string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + pv);
+                                Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                File.Copy(src, dst, true);
+                                var hd = new byte[12];
+                                using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
+                                tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
                             }
-                            catch { flat = false; }
-                            if (!flat)
-                                foreach (var mp in menuPic)
-                                {
-                                    string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
-                                    string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + pv);
-                                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                                    File.Copy(src, dst, true);
-                                    var hd = new byte[12];
-                                    using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
-                                    tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
-                                }
                             any = true; full = true;
                         }
                         else
@@ -482,7 +468,7 @@ namespace CustomOutfits
             // files of character folders that no costume of the game uses (e.g. figure-viewer materials)
             var used = new HashSet<string>(report.Units.SelectMany(u => new[] { u.V.Replaces }), StringComparer.OrdinalIgnoreCase);
             foreach (var k in byVirt.Keys.Where(k => k.StartsWith(PlayerRoot + "/") && k.EndsWith(".mdf2") && !k.EndsWith("_figure.mdf2") && !used.Contains(k)).OrderBy(k => k))
-                report.Warnings.Add($"{k.Substring(PlayerRoot.Length + 1)}: " + (k.Contains("/pl2940/") ? "only used by the Extras model viewer, which is not supported, skipped" : "not used by any costume of the game, skipped"));
+                report.Warnings.Add($"{k.Substring(PlayerRoot.Length + 1)}: " + (k.Contains("/pl2940/") ? "only used by the Extras model viewer, which is not supported, skipped" : k.Contains("pl2901_zombie") ? "the zombie face of the opening cutscene is not swapped, skipped" : "not used by any costume of the game, skipped"));
             return report;
         }
 
