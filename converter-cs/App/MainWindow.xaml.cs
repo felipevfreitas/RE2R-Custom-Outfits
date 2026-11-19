@@ -87,13 +87,13 @@ namespace CustomOutfits
         public Visibility RemoveVisibility { get; }
         public Visibility WarningsVisibility => Plan.Warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        // picture in the game's costume menu (RE2, Leon/Claire outfits): the user's image, else the mod's own
+        // picture in the game's costume menu (RE2 Leon/Claire, RE3 Jill/Carlos outfits): the user's image, else the mod's own
         // costume-menu picture, else the mod's screenshot, else one drawn from the outfit, else a placeholder
         private string Screenshot => Plan.Options.Select(o => o.Screenshot).FirstOrDefault(s => s != null);
         private string Drawn => (Core.MainOption(Plan)?.Outfits ?? new List<PlanOutfit>()).Concat(Plan.Options.SelectMany(o => o.Outfits))
             .Select(o => o.Drawn).FirstOrDefault(d => d != null && File.Exists(d));
         public Visibility PictureVisibility =>
-            Plan.Game == "re2" && Plan.Options.Any(o => o.Outfits.Any(x => x.Part == "body" && (x.Character == "claire" || x.Character == "leon")))
+            Plan.Options.Any(o => o.Outfits.Any(x => x.Part == "body" && (Plan.Game == "re2" ? (x.Character == "claire" || x.Character == "leon") : (x.Character == "jill" || x.Character == "carlos"))))
                 ? Visibility.Visible : Visibility.Collapsed;
         public string PictureText =>
             Plan.CustomPicture != null ? "Your image: " + Path.GetFileName(Plan.CustomPicture)

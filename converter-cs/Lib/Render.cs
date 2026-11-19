@@ -1,4 +1,4 @@
-// Render.cs - draws an outfit (body + face + hair of Resident Evil 2, non-RT files) for the picture in the game's
+// Render.cs - draws an outfit (body + face + hair of Resident Evil 2 or 3, non-RT files) for the picture in the game's
 // costume menu, when the mod brings no image. Software renderer, nothing to install:
 // - meshes .mesh.1808312334 (LOD 0), skinned to a pose made in Blender (Lib/Poses/<character>.json: for each moved
 //   bone, its rotation from the rest pose, applied by bone name, so it fits every outfit of that character);
@@ -23,6 +23,17 @@ namespace CustomOutfits
     {
         public byte[] Mesh, Mdf;
         public Func<string, byte[]> Texture; // texture path from the mdf2 (".tex", no version) -> .tex.10 file, or null
+    }
+
+    /// <summary>What differs between the games: RE3 files (mdf2 v13), hair without a cut-out in the alpha, the face skin drawn
+    /// from the front only (a turned head folds the throat and showed its inside), the picture on an opaque black
+    /// background with a soft glow like the game's pictures (the RE3 menu ignores transparency).</summary>
+    public sealed class RenderOptions
+    {
+        public bool Re3;
+        public double Frame = 0.5, Fill = 0.92; // part of the height shown from the top; share of the picture the figure fills
+        public static readonly RenderOptions Re2 = new RenderOptions();
+        public static readonly RenderOptions Re3Jill = new RenderOptions { Re3 = true, Frame = 0.62, Fill = 0.86 };
     }
 
     public static class OutfitRender
@@ -93,7 +104,7 @@ namespace CustomOutfits
         {
             public Tex Color, Atos;
             public double[] Tint;
-            public bool HairAlpha;
+            public bool HairAlpha, Cull;
         }
 
         // textures above this size are reduced (the picture is 1024 pixels drawn at 3x: more detail is not visible)
@@ -144,7 +155,7 @@ namespace CustomOutfits
 
         // BaseColor of every material of an mdf2 v10 (entries of 0x40 bytes; param count @0x10, param headers @0x20,
         // data @0x30; param header 0x18 bytes: name (UTF-16) @0, component count @0x10, offset in the data @0x14)
-        private static double[][] BaseColors(byte[] b)
+        private static double[][] BaseColors(byte[] b, bool re3 = false)
         {
             int n = BitConverter.ToUInt16(b, 6);
             var res = new double[n][];
@@ -160,7 +171,7 @@ namespace CustomOutfits
                     int end = nameOff;
                     while (end + 1 < b.Length && (b[end] | b[end + 1]) != 0) end += 2;
                     if (Encoding.Unicode.GetString(b, nameOff, end - nameOff) != "BaseColor") continue;
-                    int comp = (int)BitConverter.ToUInt32(b, h + 0x10), rel = (int)BitConverter.ToUInt32(b, h + 0x14);
+                    int comp = (int)BitConverter.ToUInt32(b, h + (re3 ? 0x14 : 0x10)), rel = (int)BitConverter.ToUInt32(b, h + (re3 ? 0x10 : 0x14)); // (v13: offset first, then the count)
                     if (comp < 3) break;
                     res[i] = new double[] { BitConverter.ToSingle(b, (int)(pd + rel)), BitConverter.ToSingle(b, (int)(pd + rel + 4)), BitConverter.ToSingle(b, (int)(pd + rel + 8)) };
                     break;
@@ -238,8 +249,9 @@ namespace CustomOutfits
         }
 
         /// <summary>Draws the parts (body first) and returns the picture as RGBA (w x h), transparent background.</summary>
-        public static byte[] Render(List<RenderPart> parts, Dictionary<string, double[]> pose, int W = 1024, int H = 1024)
+        public static byte[] Render(List<RenderPart> parts, Dictionary<string, double[]> pose, int W = 1024, int H = 1024, RenderOptions opt = null)
         {
+            opt = opt ?? RenderOptions.Re2;
             const int SS = 3;
             double yaw = -25 * Math.PI / 180, cy = Math.Cos(yaw), sy = Math.Sin(yaw);
             var bodyS = new Dictionary<string, double[]>();
@@ -254,7 +266,7 @@ namespace CustomOutfits
                 long lodHdr = U64(0x18), bufHdr = U64(0x50), matIdx = U64(0x60), names = U64(0x78);
                 int matCount = b[lodHdr + 1];
                 var mats = Mdf2.Parse(part.Mdf);
-                var colors = BaseColors(part.Mdf);
+                var colors = BaseColors(part.Mdf, opt.Re3);
                 var texCache = new Dictionary<string, Tex>(StringComparer.OrdinalIgnoreCase);
                 Tex Texture(string p)
                 {
@@ -279,7 +291,8 @@ namespace CustomOutfits
                         // white on most materials; the actual color on hair, beard and brows (their textures are a light base)
                         Tint = bc != null && bc.Any(v => Math.Abs(v - 1) > 0.001) ? bc : null,
                         // hair shaders: the alpha of the color texture is the coverage (elsewhere it is metalness)
-                        HairAlpha = Regex.IsMatch(m.Mmtr ?? "", "hair", RegexOptions.IgnoreCase),
+                        HairAlpha = !opt.Re3 && Regex.IsMatch(m.Mmtr ?? "", "hair", RegexOptions.IgnoreCase), // (RE3: the alpha of the hair texture is not a cut-out)
+                        Cull = opt.Re3 && Regex.IsMatch(name, "Face_Mat", RegexOptions.IgnoreCase),
                     };
                 }
                 long lod0 = U64(U64(lodHdr + 0x40));
@@ -373,13 +386,13 @@ namespace CustomOutfits
                 mnY = Math.Min(mnY, Math.Min(t.Y0, Math.Min(t.Y1, t.Y2)));
                 mxY = Math.Max(mxY, Math.Max(t.Y0, Math.Max(t.Y1, t.Y2)));
             }
-            double top = mxY, bottom = mxY - (mxY - mnY) * 0.5;
+            double top = mxY, bottom = mxY - (mxY - mnY) * opt.Frame;
             double vx0 = 1e9, vx1 = -1e9;
             void Seen(float x, float y) { if (y >= bottom && y <= top) { vx0 = Math.Min(vx0, x); vx1 = Math.Max(vx1, x); } }
             foreach (var t in tris) { Seen(t.X0, t.Y0); Seen(t.X1, t.Y1); Seen(t.X2, t.Y2); }
             if (vx1 < vx0) { vx0 = tris.Min(t => Math.Min(t.X0, Math.Min(t.X1, t.X2))); vx1 = tris.Max(t => Math.Max(t.X0, Math.Max(t.X1, t.X2))); }
             int IW = W * SS, IH = H * SS;
-            const double fill = 0.92;
+            double fill = opt.Fill;
             double sc = Math.Min(IW * fill / (vx1 - vx0), IH * fill / (top - bottom)), cx = (vx0 + vx1) / 2, cyy = (top + bottom) / 2;
             double SHX = -0.05 * IW, SHY = 0.1 * IH;
             double PX(double x) => IW / 2.0 + SHX + (x - cx) * sc;
@@ -406,6 +419,7 @@ namespace CustomOutfits
                 double d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
                 if (Math.Abs(d) < 1e-12) continue;
                 var M = t.M;
+                if (M.Cull && d > 0) continue; // back-facing skin
                 var n = t.N;
                 for (int y = y0; y <= y1; y++)
                     for (int x = x0; x <= x1; x++)
@@ -464,7 +478,78 @@ namespace CustomOutfits
                         outp[o + 3] = (byte)(255 * al / (SS * SS));
                     }
                 }
+            if (opt.Re3) { FillHoles(outp, W, H, Math.Max(3, W / 72)); OnBlackWithGlow(outp, W, H); }
             return outp;
+        }
+
+        // A background pixel with figure on all four sides within r pixels is a hole: it takes the average color of those
+        // neighbours. (Gaps wider than 2 r, such as between an arm and the body, stay.)
+        private static void FillHoles(byte[] px, int w, int h, int r)
+        {
+            var src = (byte[])px.Clone();
+            bool Solid(int x, int y) => src[(y * w + x) * 4 + 3] >= 250;
+            var found = new int[4][];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    if (src[(y * w + x) * 4 + 3] >= 250) continue;
+                    int[] dx = { -1, 1, 0, 0 }, dy = { 0, 0, -1, 1 };
+                    int sr = 0, sg = 0, sb = 0, n = 0;
+                    for (int d = 0; d < 4; d++)
+                    {
+                        bool ok = false;
+                        for (int k = 1; k <= r && !ok; k++)
+                        {
+                            int nx = x + dx[d] * k, ny = y + dy[d] * k;
+                            if (nx < 0 || ny < 0 || nx >= w || ny >= h) break;
+                            if (Solid(nx, ny)) { int q = (ny * w + nx) * 4; sr += src[q]; sg += src[q + 1]; sb += src[q + 2]; n++; ok = true; }
+                        }
+                        if (!ok) { n = -1; break; }
+                    }
+                    if (n != 4) continue;
+                    int o = (y * w + x) * 4;
+                    px[o] = (byte)(sr / 4); px[o + 1] = (byte)(sg / 4); px[o + 2] = (byte)(sb / 4); px[o + 3] = 255;
+                }
+        }
+
+        // RE3 menu pictures are opaque: the figure over black, with a soft cool glow around it like the game's pictures
+        private static void OnBlackWithGlow(byte[] px, int w, int h)
+        {
+            var a = new float[w * h];
+            for (int i = 0; i < a.Length; i++) a[i] = px[i * 4 + 3] / 255f;
+            var tmp = new float[w * h];
+            int r = Math.Max(2, w / 85); // (3 passes: the halo reaches about 2.5 r)
+            for (int pass = 0; pass < 3; pass++)
+            {
+                for (int y = 0; y < h; y++) // horizontal box blur
+                {
+                    float sum = 0;
+                    for (int x = -r; x <= r; x++) sum += a[y * w + Math.Min(w - 1, Math.Max(0, x))];
+                    for (int x = 0; x < w; x++)
+                    {
+                        tmp[y * w + x] = sum / (2 * r + 1);
+                        sum += a[y * w + Math.Min(w - 1, x + r + 1)] - a[y * w + Math.Max(0, x - r)];
+                    }
+                }
+                for (int x = 0; x < w; x++) // vertical
+                {
+                    float sum = 0;
+                    for (int y = -r; y <= r; y++) sum += tmp[Math.Min(h - 1, Math.Max(0, y)) * w + x];
+                    for (int y = 0; y < h; y++)
+                    {
+                        a[y * w + x] = sum / (2 * r + 1);
+                        sum += tmp[Math.Min(h - 1, y + r + 1) * w + x] - tmp[Math.Max(0, y - r) * w + x];
+                    }
+                }
+            }
+            for (int i = 0; i < w * h; i++)
+            {
+                int o = i * 4;
+                double cov = px[o + 3] / 255.0, glow = Math.Min(1.0, a[i] * 1.0);
+                double[] g = { 235 * glow, 240 * glow, 255 * glow };
+                for (int k = 0; k < 3; k++) px[o + k] = (byte)Math.Min(255, px[o + k] * cov + g[k] * (1 - cov));
+                px[o + 3] = 255;
+            }
         }
 
         /// <summary>Saves RGBA as PNG (keeps the transparency).</summary>

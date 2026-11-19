@@ -168,6 +168,17 @@ namespace CustomOutfits
             }
             bool Has(string virt) => virt != null && byVirt.ContainsKey(virt);
 
+            // the menu picture of the mod for this outfit: Jill's pictures are 00_00 (default), 00_01 (S.T.A.R.S.), 00_02 (classic)
+            List<ModFile> MenuPicture(string character, Variant v)
+            {
+                if (character != "jill" || v == null) return null;
+                int c = v.Costumes.Count > 0 ? v.Costumes[0] : v.Direct.Count > 0 ? v.Direct[0] : 0;
+                string idx = c == 3 ? "01" : c == 5 ? "02" : "00";
+                if (!byVirt.TryGetValue($"escape/ui/ui0600/tex/ui0601_00_{idx}_iam.tex", out var l)) return null;
+                l = l.Where(x => Regex.IsMatch(x.Rel, @"\.tex\.\d+$")).ToList();
+                return l.Count > 0 ? l : null;
+            }
+
             string jsonDir = Os(outRoot ?? ".", "reframework/data/CustomOutfits/outfits");
             if (!dry) Directory.CreateDirectory(jsonDir);
 
@@ -279,6 +290,7 @@ namespace CustomOutfits
                             {
                                 Key = Path.GetFileName(e.Mdf).Replace(".mdf2", "") + (m.Id == menu ? "" : "@" + m.Id),
                                 Replaces = e.Mdf,
+                                SrcMesh = e.Mesh, // (to draw the outfit)
                                 Mdf = mdfCustom,
                                 Mesh = modMesh ? CustomOf(menu, e.Mesh) : e.Mesh,
                                 // the outfit is worn over any costume, so it carries the skin mesh and the physics
@@ -385,11 +397,53 @@ namespace CustomOutfits
                     var entry = new JObj().Set("id", id).Set("name", name).Set("character", menu).Set("part", part)
                         .Set("version", 2).Set("game", "re3").Set("package", opts.Package).Set("families", new List<string>()).Set("default", def)
                         .Set("variants", variants.Select(v => v.ToJson()).ToList());
+                    // picture for the game's costume menu (bodies): the mod's image, else the one drawn from the outfit.
+                    // The RE3 menu shows pictures opaque (black background); .190820018 = non-RT, .34 = RT build.
+                    if (part == "body" && !dry)
+                    {
+                        string thumbVirt = $"custom_outfits/{menu}/{slug}/thumbnail";
+                        int tw = 0, th = 0;
+                        bool any = false, full = false;
+                        // 1st choice: the costume-menu picture the mod itself brings (it replaces the game's:
+                        // escape/ui/ui0600/tex/ui0601_00_<n>_iam.tex, n = 00 default, 01 S.T.A.R.S., 02 classic), shown whole
+                        var menuPic = opts.ThumbnailForced ? null : MenuPicture(menu, variants[def]);
+                        if (menuPic != null)
+                        {
+                            foreach (var mp in menuPic)
+                            {
+                                string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
+                                string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", thumbVirt + ".tex." + pv);
+                                Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                File.Copy(src, dst, true);
+                                var hd = new byte[12];
+                                using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
+                                tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                            }
+                            any = true; full = true;
+                        }
+                        else
+                        foreach (int ver in new[] { 190820018, 34 })
+                        {
+                            string tf = Os(outRoot, "natives/stm", thumbVirt + ".tex." + ver);
+                            if (opts.Thumbnail != null) { if (Tex.WriteThumbnail(opts.Thumbnail, tf, ver, out tw, out th)) any = true; }
+                            else if (opts.Drawn != null && opts.Drawn.TryGetValue(menu, out var drawn) && File.Exists(drawn))
+                            {
+                                if (Tex.WriteThumbnail(drawn, tf, ver, out tw, out th, 1024, true)) { any = true; full = true; } // BC3 like the placeholder that is known to show in the RE3 menu (the picture is already opaque)
+                            }
+                        }
+                        if (any)
+                        {
+                            entry.Set("thumbnail", thumbVirt + ".tex").Set("thumbnail_size", new List<int> { tw, th });
+                            if (full) entry.Set("thumbnail_full", true);
+                        }
+                        else if (opts.Thumbnail != null) report.Warnings.Add("the mod image could not be read: the game menu shows a placeholder");
+                    }
                     report.Outfits.Add(new OutfitInfo
                     {
                         Id = id, Character = menu, Part = part, Name = name,
                         Also = new List<string>(),
                         VariantLabels = variants.Select(v => v.Label).ToList(),
+                        Variants = variants, Default = def, Group = menu,
                     });
                     if (!dry) File.WriteAllText(Path.Combine(jsonDir, id + ".json"), Json.Stringify(entry), new UTF8Encoding(false));
                 }

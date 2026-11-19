@@ -336,9 +336,9 @@ namespace CustomOutfits
                 .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
             plan.HasMenuPicture = plan.MenuPictureFile != null;
             // no image at all in the mod: the picture of each body is drawn from the outfit itself
-            if (game == "re2" && !plan.HasMenuPicture && plan.Options.All(o => o.Screenshot == null))
+            if ((game == "re2" || game == "re3") && !plan.HasMenuPicture && plan.Options.All(o => o.Screenshot == null))
             {
-                try { DrawPictures(plan, reports); }
+                try { if (game == "re3") DrawPicturesRe3(plan, reports); else DrawPictures(plan, reports); }
                 catch { /* no picture: the game shows a placeholder */ }
             }
             if (plan.Options.Count == 0)
@@ -439,6 +439,93 @@ namespace CustomOutfits
                         po.Drawn = file;
                     }
                     catch { /* this outfit can't be drawn (RT-only files, unknown format): placeholder */ }
+                }
+        }
+
+        // ------------------------------------------------------------------ drawn pictures (RE3)
+        private static readonly Dictionary<string, string> Re3Versions = new Dictionary<string, string>
+        {
+            ["mesh"] = "1902042334", ["mdf2"] = "13", ["tex"] = "190820018",
+        };
+
+        /// <summary>Like GameFile, for Resident Evil 3 (natives/stm, non-RT versions).</summary>
+        private static byte[] GameFileRe3(string root, string gameDir, GamePaks paks, string virt, string prefix = "")
+        {
+            string ext = virt.Substring(virt.LastIndexOf('.') + 1).ToLowerInvariant();
+            if (!Re3Versions.TryGetValue(ext, out var ver)) return null;
+            string rel = (prefix + virt + "." + ver).Replace('/', Path.DirectorySeparatorChar);
+            if (root != null)
+            {
+                string f = Path.Combine(root, "natives", "stm", rel);
+                if (File.Exists(f)) return File.ReadAllBytes(f);
+                string dir = Path.GetDirectoryName(Path.Combine(root, "natives", "stm", (prefix + virt).Replace('/', Path.DirectorySeparatorChar)));
+                if (Directory.Exists(dir) && Directory.EnumerateFiles(dir, Path.GetFileName(prefix + virt) + ".*").Any())
+                    throw new NotSupportedException("the mod has " + virt + " only for the RT build");
+            }
+            if (gameDir == null) return null;
+            string loose = Path.Combine(gameDir, "natives", "stm", rel);
+            if (File.Exists(loose)) return File.ReadAllBytes(loose);
+            return paks?.Read("natives/stm/" + (prefix + virt + "." + ver).ToLowerInvariant());
+        }
+
+        private static RenderPart DrawPartRe3(string root, string gameDir, GamePaks paks, string mdf, string mesh)
+        {
+            if (mdf == null || mesh == null) return null;
+            var mdfB = GameFileRe3(root, gameDir, paks, mdf);
+            var meshB = GameFileRe3(root, gameDir, paks, mesh);
+            if (mdfB == null || meshB == null) return null;
+            return new RenderPart
+            {
+                Mdf = mdfB, Mesh = meshB,
+                Texture = t => GameFileRe3(root, null, null, t, "streaming/") ?? GameFileRe3(root, null, null, t)
+                    ?? GameFileRe3(null, gameDir, paks, t, "streaming/") ?? GameFileRe3(null, gameDir, paks, t),
+            };
+        }
+
+        /// <summary>RE3: draws every body of the mod (characters with a thumbnail pose: Jill) with the face and hair it is worn
+        /// with in game: the same mod's, else the game's for the costume it is shown in. Opaque, on black, like the game's pictures.</summary>
+        private static void DrawPicturesRe3(Plan plan, List<KeyValuePair<PlanOption, ConvertReport>> reports)
+        {
+            var paks = Converter.Paks(plan.GameDir);
+            foreach (var kv in reports)
+                foreach (var body in kv.Value.Outfits.Where(o => o.Part == "body" && o.Variants != null))
+                {
+                    var pose = OutfitRender.Pose(body.Character);
+                    var po = kv.Key.Outfits.FirstOrDefault(x => x.Character == body.Character && x.Part == "body");
+                    var model = Re3.Models.FirstOrDefault(m => m.Id == body.Character);
+                    if (pose == null || po == null || model == null) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture skipped: pose " + (pose != null) + ", plan outfit " + (po != null) + ", model " + (model != null)); continue; }
+                    try
+                    {
+                        var bv = body.Variants[body.Default];
+                        int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
+                        var first = DrawPartRe3(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh);
+                        if (first == null) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture skipped: body files not found (" + bv.Replaces + " / " + bv.SrcMesh + ")"); continue; }
+                        var parts = new List<RenderPart> { first };
+                        model.Table.TryGetValue(costume, out var cps);
+                        foreach (var p in new[] { "face", "hair" })
+                        {
+                            var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
+                                .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null)
+                                    .Select(o => new { r.Key.Root, O = o }))
+                                .FirstOrDefault();
+                            RenderPart rp = null;
+                            if (mine != null)
+                            {
+                                var v = mine.O.Variants.FirstOrDefault(x => x.Costumes.Contains(costume)) ?? mine.O.Variants[mine.O.Default];
+                                rp = DrawPartRe3(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh);
+                            }
+                            else if (cps != null && cps.TryGetValue(p, out var cp))
+                                rp = DrawPartRe3(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
+                            if (rp != null) parts.Add(rp);
+                        }
+                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024, RenderOptions.Re3Jill);
+                        if (rgba == null) continue;
+                        if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
+                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + ".png");
+                        OutfitRender.SavePng(rgba, 1024, 1024, file);
+                        po.Drawn = file;
+                    }
+                    catch (Exception ex) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture: " + ex); /* else: this outfit can't be drawn: placeholder */ }
                 }
         }
 
