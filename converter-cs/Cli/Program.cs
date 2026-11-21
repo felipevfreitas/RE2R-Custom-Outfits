@@ -53,6 +53,12 @@ namespace CustomOutfits.Cli
                     case "build":
                     {
                         var p = Core.Analyze(args[1], Game(3));
+                        // (tests) CO_EACH=1: one entry per outfit for every pack body; prints the outfits each body lists
+                        foreach (var o in p.Options.SelectMany(x => x.Outfits))
+                        {
+                            if (Environment.GetEnvironmentVariable("CO_EACH") == "1" && o.Pickable.Count > 1) o.EachEntry = true;
+                            if (o.Pickable.Count > 0) Console.WriteLine($"{o.Character} {o.Part}: {string.Join(", ", o.Pickable.Select(v => v.Slot + " [" + v.Key + "]"))}{(o.EachEntry ? " (one entry each)" : "")}");
+                        }
                         var r = Core.Build(p, args[2], false);
                         Core.Cleanup(p);
                         Console.WriteLine($"ok: {r.Output} ({r.Outfits} outfits)");

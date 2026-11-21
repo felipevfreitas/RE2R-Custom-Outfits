@@ -176,6 +176,8 @@ namespace CustomOutfits
                 }
             }
             bool Has(string virt) => virt != null && byVirt.ContainsKey(virt);
+            // the costume tables, with the files the mod's own prefabs point to (a pack in folders of its own, like ac201a/)
+            var tables = ModTables(modRoot, byVirt);
 
             // the menu picture of the mod for this outfit: Jill's pictures are 00_00 (default), 00_01 (S.T.A.R.S.), 00_02 (classic)
             List<ModFile> MenuPicture(string character, Variant v)
@@ -245,7 +247,7 @@ namespace CustomOutfits
                 var done = new Dictionary<string, Variant>(StringComparer.OrdinalIgnoreCase); // model|part|mdf -> variant
                 foreach (var m in Models.Where(x => x.Menu == menu))
                 {
-                    foreach (var c in m.Table)
+                    foreach (var c in tables[m])
                     {
                         foreach (var kv in c.Value)
                         {
@@ -302,7 +304,7 @@ namespace CustomOutfits
 
                             var v = new Variant
                             {
-                                Key = Path.GetFileName(e.Mdf).Replace(".mdf2", "") + (m.Id == menu ? "" : "@" + m.Id),
+                                Key = VariantKey(e.Mdf) + (m.Id == menu ? "" : "@" + m.Id),
                                 Replaces = e.Mdf,
                                 SrcMesh = e.Mesh, // (to draw the outfit)
                                 Mdf = mdfCustom,
@@ -341,7 +343,7 @@ namespace CustomOutfits
                         var mine = all.Where(v => variantModel[v] == m && (!anyPrimary || primary.Contains(v))).ToList();
                         if (mine.Count == 0) continue;
                         kept.AddRange(mine);
-                        foreach (var c in m.Table.Where(t => t.Value.ContainsKey(part)).Select(t => t.Key))
+                        foreach (var c in tables[m].Where(t => t.Value.ContainsKey(part)).Select(t => t.Key))
                         {
                             var v = mine.FirstOrDefault(x => x.Direct.Contains(c))
                                 ?? mine.FirstOrDefault(x => x.Direct.Any(d => StageOf(m, d) == StageOf(m, c)))
@@ -395,8 +397,13 @@ namespace CustomOutfits
                     foreach (var v in variants)
                     {
                         var m = variantModel[v];
-                        var labels = v.Direct.Select(c => m.Labels.TryGetValue(c, out var l) ? l : "costume " + c).Distinct().ToList();
+                        // named after the costumes of the game menu it is worn with ("S.T.A.R.S.", not "Default / Default, injured")
+                        var shown = m.Id == menu && Core.Re3Menu.TryGetValue(menu, out var mc) && v.Direct.Any(c => Array.IndexOf(mc, c) >= 0)
+                            ? v.Direct.Where(c => Array.IndexOf(mc, c) >= 0) : v.Direct;
+                        var labels = shown.Select(c => m.Labels.TryGetValue(c, out var l) ? l : "costume " + c).Distinct().ToList();
                         v.Label = labels.Count > 0 ? string.Join(" / ", labels) : "extra";
+                        if (opts.VariantNames != null && opts.VariantNames.TryGetValue($"{menu}|{part}|{v.Key}", out var custom) && !string.IsNullOrWhiteSpace(custom))
+                            v.Custom = custom.Trim();
                         if (missingOf.TryGetValue(v, out var miss))
                             report.Warnings.Add($"{PartName(part)} \"{v.Label}\": needs {miss.Count} file(s) that neither the mod nor the game has "
                                 + $"(e.g. {miss[0]}). It may look wrong or not load in game; the original mod probably needs another mod.");
@@ -410,7 +417,44 @@ namespace CustomOutfits
                     string name = opts.Names.TryGetValue($"{menu}|{part}", out var nm) && !string.IsNullOrWhiteSpace(nm) ? nm : displayName;
                     var entry = new JObj().Set("id", id).Set("name", name).Set("character", menu).Set("part", part)
                         .Set("version", 2).Set("game", "re3").Set("package", opts.Package).Set("families", new List<string>()).Set("default", def)
-                        .Set("variants", variants.Select(v => v.ToJson()).ToList());
+                        ;
+                    // a pack (an outfit for several costumes of the game menu): one entry per outfit in the game's costume menu,
+                    // each with its own picture (the image the user chose, else the mod's own picture of that costume)
+                    bool each = part == "body" && opts.EachEntry.Contains(menu + "|body");
+                    if (each && !dry)
+                        foreach (var v in variants.Where(x => !(x.Key ?? "").Contains("@")
+                            && x.Direct.Any(c => Core.Re3Menu.TryGetValue(menu, out var mc) && Array.IndexOf(mc, c) >= 0)))
+                        {
+                            string safe = Regex.Replace(v.Key ?? "v", "[^a-z0-9_]", "_", RegexOptions.IgnoreCase).ToLowerInvariant();
+                            string tv = $"custom_outfits/{menu}/{slug}/thumb_{safe}";
+                            int tw = 0, th = 0;
+                            if (opts.VariantPictures.TryGetValue($"{menu}|body|{v.Key}", out var img) && File.Exists(img))
+                            {
+                                bool ok = false;
+                                foreach (int ver in new[] { 190820018, 34 })
+                                    if (Tex.WriteThumbnail(img, Os(outRoot, "natives/stm", tv + ".tex." + ver), ver, out tw, out th)) ok = true;
+                                if (ok) { v.Thumb = tv + ".tex"; v.ThumbW = tw; v.ThumbH = th; v.ThumbFull = false; }
+                            }
+                            else if (MenuPicture(menu, v) is List<ModFile> own)
+                            {
+                                foreach (var mp in own)
+                                {
+                                    string pv = Regex.Match(mp.Rel, @"\.tex\.(\d+)$").Groups[1].Value;
+                                    string src = Os(modRoot, mp.Natives, mp.Rel), dst = Os(outRoot, "natives/stm", tv + ".tex." + pv);
+                                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                    File.Copy(src, dst, true);
+                                    var hd = new byte[12];
+                                    using (var fs = File.OpenRead(src)) fs.Read(hd, 0, 12);
+                                    tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                                }
+                                v.Thumb = tv + ".tex"; v.ThumbW = tw; v.ThumbH = th; v.ThumbFull = true;
+                            }
+                        }
+                    entry.Set("variants", variants.Select(v => v.ToJson()).ToList());
+                    if (each) entry.Set("menu_entries", "each");
+                    string groupName = opts.GroupNames != null && opts.GroupNames.TryGetValue(menu + "|" + part, out var gn) && !string.IsNullOrWhiteSpace(gn)
+                        ? gn.Trim() : opts.PackageName;
+                    if (!string.IsNullOrWhiteSpace(groupName)) entry.Set("package_name", groupName);
                     // picture for the game's costume menu (bodies): the mod's image, else the one drawn from the outfit.
                     // The RE3 menu shows pictures opaque (black background); .190820018 = non-RT, .34 = RT build.
                     if (part == "body" && !dry)
@@ -472,6 +516,103 @@ namespace CustomOutfits
         }
 
         private static string PartName(string part) => part == "body" ? "Body" : part == "face" ? "Face" : "Hair";
+
+        // variant key: the material's name ("pl2010"); a material in a folder of the mod's own gets that folder in front
+        // ("ac201a_pl2001", "kgmali_pl2001": a pack can have one per costume with the same file name)
+        private static string VariantKey(string mdf)
+        {
+            string name = Path.GetFileName(mdf).Replace(".mdf2", "");
+            if (!mdf.StartsWith(PlayerRoot + "/", StringComparison.OrdinalIgnoreCase)) return name;
+            string top = mdf.Substring(PlayerRoot.Length + 1).Split('/')[0];
+            return Regex.IsMatch(top, @"^pl\d{4}$", RegexOptions.IgnoreCase) ? name : top.ToLowerInvariant() + "_" + name;
+        }
+
+        // character files named by a prefab (its UTF-16 strings)
+        private static List<string> PrefabStrings(string file)
+        {
+            var buf = File.ReadAllBytes(file);
+            string text = Encoding.Unicode.GetString(buf, 0, buf.Length & ~1);
+            // (the path is cut out of the printable run: bytes of the field before it can be printable too)
+            return Regex.Matches(text.ToLowerInvariant(), @"(?:escape|sectionroot)/character/player/[ -~]+").Cast<Match>().Select(m => m.Value).ToList();
+        }
+
+        // part a character file belongs to, by its folder: <group>/mesh = body, pl…1 = face, pl…5 = hair (also in a mod's own
+        // folder: ac201a/mesh = body, ac201a/pl2001 = face)
+        private static string PartOfPath(string p)
+        {
+            var m = Regex.Match(p, @"character/player/[^/]+/(?:(mesh)|pl\d{3}([15])[^/]*/mesh)/");
+            return !m.Success ? null : m.Groups[1].Success ? "body" : m.Groups[2].Value == "1" ? "face" : "hair";
+        }
+
+        /// <summary>A copy of every model's costume table, with the files the mod's own prefabs give each costume. A pack can keep its
+        /// outfits in folders of its own (ac201a/, kgmali/) and point the game's costumes to them through prefabs
+        /// (escape/prefab/character/player/pl2000/body/pl2000_body_03.pfb = Jill's costume 3, survivor/parts/pl2700/... = infected).</summary>
+        private static Dictionary<Model, CostumeTable> ModTables(string modRoot, Dictionary<string, List<ModFile>> byVirt)
+        {
+            var tables = new Dictionary<Model, CostumeTable>();
+            foreach (var m in Models)
+            {
+                var t = new CostumeTable();
+                foreach (var c in m.Table) t[c.Key] = new Dictionary<string, CostumePart>(c.Value);
+                tables[m] = t;
+            }
+            CostumePart With(CostumePart old, string part, List<string> s)
+            {
+                string mesh = s.Where(x => x.EndsWith(".mesh") && !x.EndsWith("_blend.mesh")).FirstOrDefault();
+                string mdf = s.Where(x => x.EndsWith(".mdf2")).FirstOrDefault();
+                string blend = s.FirstOrDefault(x => x.EndsWith("_blend.mesh"));
+                string chain = s.FirstOrDefault(x => x.EndsWith(".chain"));
+                return new CostumePart
+                {
+                    Mesh = mesh ?? old.Mesh, Mdf = mdf ?? old.Mdf,
+                    Skin = part == "face" ? (blend ?? old.Skin) : (mesh ?? old.Skin),
+                    Chain = part == "face" ? old.Chain : (chain ?? old.Chain),
+                };
+            }
+            foreach (var kv in byVirt)
+            {
+                // the prefab in the game's own version (a mod can leave stray copies like ".pfb.171")
+                var file = kv.Value.FirstOrDefault(f => Regex.IsMatch(f.Rel, @"\.pfb\.(16|17)$", RegexOptions.IgnoreCase));
+                if (file == null) continue;
+                if (kv.Key == "escape/prefab/character/player/pl2900.pfb")
+                {
+                    // the opening-cutscene actor carries body, face and hair itself: each file goes to its part by its folder
+                    var intro = Models.First(x => x.Id == "jill_intro");
+                    var s = PrefabStrings(Os(modRoot, file.Natives, file.Rel));
+                    foreach (var c in tables[intro].Keys.ToList())
+                    {
+                        var parts = tables[intro][c];
+                        var parts2 = new Dictionary<string, CostumePart>(parts);
+                        foreach (var part in new[] { "body", "face", "hair" })
+                        {
+                            if (!parts.TryGetValue(part, out var old)) continue;
+                            var mine = s.Where(x => PartOfPath(x) == part).ToList();
+                            if (!mine.Any(x => x.EndsWith(".mesh") || x.EndsWith(".mdf2"))) continue;
+                            var np = With(old, part, mine);
+                            if (part == "face" && c != 0) np.Mdf = old.Mdf; // (costume 1 = the zombie material of that face: the game's)
+                            parts2[part] = np;
+                        }
+                        tables[intro][c] = parts2;
+                    }
+                    continue;
+                }
+                var mm = Regex.Match(kv.Key, @"^escape/prefab/character/(player|survivor/parts)/(pl\d{4})/(body|face|hair)/pl\d{4}_(?:body|face|hair)_([0-9a-f]{2})\.pfb$");
+                if (!mm.Success) continue;
+                string grp = mm.Groups[2].Value, prt = mm.Groups[3].Value;
+                int costume = System.Convert.ToInt32(mm.Groups[4].Value, 16);
+                // player/<group>: the character itself; survivor/parts/<group>: a special model (survivor/parts/pl2000 = the face and
+                // hair of Jill in the mirror, whose body is survivor/parts/pl2800)
+                var model = mm.Groups[1].Value == "player" ? Models.FirstOrDefault(x => x.Group == grp && x.Id == x.Menu)
+                    : grp == "pl2000" ? Models.FirstOrDefault(x => x.Id == "jill_mirror")
+                    : Models.FirstOrDefault(x => x.Group == grp);
+                if (model == null || !tables[model].TryGetValue(costume, out var cparts) || !cparts.TryGetValue(prt, out var cur)) continue;
+                var strs = PrefabStrings(Os(modRoot, file.Natives, file.Rel));
+                if (!strs.Any(x => x.EndsWith(".mdf2") || x.EndsWith(".mesh"))) continue;
+                var copy = new Dictionary<string, CostumePart>(cparts) { [prt] = With(cur, prt, strs) };
+                tables[model][costume] = copy;
+            }
+            return tables;
+        }
 
         private static string Hash4(string s)
         {

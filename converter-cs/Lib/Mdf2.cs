@@ -49,10 +49,14 @@ namespace CustomOutfits
         private static bool StrPtr(byte[] b, long p, long min) => p >= min && p < b.Length - 1 && (p & 1) == 0;
 
         // every texture header of every material points to valid strings (tells 0x18 from 0x20 headers apart)
-        private static bool Valid(byte[] b, int matCount, Layout L)
+        // loose = the texture headers may start further on (some tools write another block between the materials and them,
+        // e.g. the pl2098/pl2050 materials of "ALL S.T.A.R.S Jill" for RE3); the string pointers are still checked one by one
+        private static bool Valid(byte[] b, int matCount, Layout L, bool loose = false)
         {
             long end = 0x10 + (long)matCount * L.Mat;
-            if (end + 8 > b.Length || U64(b, 0x10 + L.TexHdr) != end) return false;
+            if (end + 8 > b.Length) return false;
+            long first = U64(b, 0x10 + L.TexHdr);
+            if (loose ? (first < end || first >= b.Length) : first != end) return false;
             for (int i = 0; i < matCount; i++)
             {
                 int o = 0x10 + i * L.Mat;
@@ -72,6 +76,8 @@ namespace CustomOutfits
             if (matCount == 0) return NonRT;
             foreach (var L in new[] { NonRT, Re3, RT })
                 if (Valid(b, matCount, L)) return L;
+            foreach (var L in new[] { NonRT, Re3, RT })
+                if (Valid(b, matCount, L, true)) return L;
             throw new InvalidDataException("unknown mdf2 layout");
         }
 

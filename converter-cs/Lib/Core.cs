@@ -355,7 +355,8 @@ namespace CustomOutfits
                         Variants = o.VariantLabels,
                         // body: the outfits of a pack; face/hair: the versions a pack brings for different costumes (Noir hair, Elza Walker hair)
                         Pickable = PickableOf(o),
-                        EachEntry = o.Part == "body" && PickableOf(o).Count > 4,
+                        // RE2: on for big packs (a small one follows the story); RE3 has no story families, so any pack gets one entry per outfit
+                        EachEntry = o.Part == "body" && PickableOf(o).Count > (Re3Menu.ContainsKey(o.Group ?? "") ? 1 : 4),
                         Also = o.Also.Select(c => CharNames.TryGetValue(c, out var an) ? an : c).ToList(),
                     };
                     foreach (var pv in po.Pickable) pv.Owner = po;
@@ -575,20 +576,27 @@ namespace CustomOutfits
         // a costume the game's costume menu lists: an extra (outside the families), or a clean stage of a family
         private static bool InGameMenu(string group, int costume)
         {
+            // RE3 (outfits grouped by menu character): Jill's menu has Default, S.T.A.R.S., Classic; Carlos's Default, Classic
+            if (Re3Menu.TryGetValue(group ?? "", out var re3)) return Array.IndexOf(re3, costume) >= 0;
             var st = Costumes.StageOf(group ?? "", costume);
             if (st == null) return true;
             if (!Costumes.Stages.TryGetValue(group, out var byFam) || !byFam.TryGetValue(st.Item1, out var stages) || st.Item2 >= stages.Length) return true;
             return stages[st.Item2].Dirt == 0;
         }
 
+        public static readonly Dictionary<string, int[]> Re3Menu = new Dictionary<string, int[]>
+        {
+            ["jill"] = new[] { 0, 3, 5 }, ["carlos"] = new[] { 0, 1 },
+        };
+
         private static List<PlanVariant> PickableOf(OutfitInfo o)
         {
             if (o.Variants == null) return new List<PlanVariant>();
-            var direct = o.Variants.Where(v => v.Direct != null && v.Direct.Count > 0).ToList();
-            if (o.Part == "body")
-                // only what the game's costume menu offers: the dirty stages (Claire 1, 2, 4) come with the campaign, never chosen
-                direct = direct.Where(v => v.Direct.Any(c => InGameMenu(o.Group, c))).ToList();
-            else
+            // only what the game's costume menu offers: the dirty / injured stages (Claire 1, 2, 4; Jill 2) come with the campaign,
+            // and the variants of Jill's other models in RE3 (key "...@jill_infected") go along with her own
+            var direct = o.Variants.Where(v => v.Direct != null && v.Direct.Count > 0 && !(v.Key ?? "").Contains("@")
+                && v.Direct.Any(c => InGameMenu(o.Group, c))).ToList();
+            if (o.Part != "body")
             {
                 direct = direct.Where(v => !StageLabel.IsMatch(v.Label ?? "")).ToList();
                 if (direct.Count < 2) return new List<PlanVariant>();

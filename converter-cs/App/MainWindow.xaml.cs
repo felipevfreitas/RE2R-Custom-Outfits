@@ -151,6 +151,8 @@ namespace CustomOutfits
             ? "In the Wardrobe menu, this " + _o.PartName.ToLowerInvariant() + " is one entry with these options. Left on automatic, each one goes with the costume it replaces; picked there, the chosen one goes with any costume. Empty name = the grey one."
             : EachEntry
             ? "Each outfit gets its own entry in the game's costume menu, with this name and picture. Empty name = the grey one."
+            : Core.Re3Menu.ContainsKey(_o.Character ?? "")
+            ? "The game's costume menu gets one entry for this mod, with the mod's picture: it wears the first outfit, or the one picked under \"Costume\" in the Wardrobe window. Empty name = the grey one."
             : "The game's costume menu gets one entry for this mod (it follows the story and uses the mod's picture). The names are used in the Wardrobe menu. Empty name = the grey one.";
     }
 
