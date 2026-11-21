@@ -22,15 +22,94 @@ namespace CustomOutfits
         public bool IsPill { get; set; }
     }
 
-    public sealed class RowVM
+    /// <summary>One outfit of a pack (a body with several outfits): the game costume it replaces, its name and picture.</summary>
+    public sealed class PickVM : System.ComponentModel.INotifyPropertyChanged
+    {
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+        private readonly RowVM _row;
+        public PlanVariant V { get; }
+        public PickVM(PlanVariant v, RowVM row) { V = v; _row = row; }
+        public string Slot => V.Slot;
+        public string Name { get => V.Name; set => V.Name = value; }
+        // grey text (and the name used) while the box is empty: a body's entry in the game menu is "<body> - <costume>";
+        // a face/hair option is listed under its entry, by the costume alone
+        public string Placeholder => _row.IsBody ? _row.Name + " - " + V.Slot : V.Slot;
+        public bool PictureOn => _row.IsBody && _row.EachEntry;
+        public bool HasPicture => V.Picture != null;
+        public bool NoPreview => Preview == null;
+        public string PictureTip => HasPicture
+            ? "Your image: " + Path.GetFileName(V.Picture) + "\nClick to choose another."
+            : "Picture of this outfit in the game's costume menu: automatic\n(the mod's own picture of this costume, else the mod's picture).\nClick to choose an image.";
+
+        private ImageSource _preview;
+        private string _previewOf;
+        public ImageSource Preview
+        {
+            get
+            {
+                if (_previewOf == V.Picture) return _preview;
+                _previewOf = V.Picture;
+                _preview = null;
+                if (V.Picture == null || !File.Exists(V.Picture)) return null;
+                try
+                {
+                    var b = new System.Windows.Media.Imaging.BitmapImage();
+                    b.BeginInit();
+                    b.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; // don't keep the file open
+                    b.DecodePixelWidth = 96;
+                    b.UriSource = new Uri(V.Picture);
+                    b.EndInit();
+                    b.Freeze();
+                    _preview = b;
+                }
+                catch { }
+                return _preview;
+            }
+        }
+        public void SetPicture(string file) { V.Picture = file; Refresh(); }
+        public void Refresh() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(null));
+    }
+
+    /// <summary>One option of a part that a package brings several times (the colours of a hair mod).</summary>
+    public sealed class OptionVM
     {
         private readonly PlanOutfit _o;
+        public OptionVM(PlanOutfit o, string from) { _o = o; From = from; }
+        public string From { get; }
+        public string Name { get => _o.Name; set => _o.Name = value; }
+    }
+
+    public sealed class RowVM : System.ComponentModel.INotifyPropertyChanged
+    {
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+        private readonly PlanOutfit _o;
+
+        // several outfits of the same part in one package: one row, with each outfit as an option
+        // the name box of this row is the name of the group in the Wardrobe menu (the options are listed under it)
+        private readonly Plan _plan;
+        private readonly string _groupKey;
+        public RowVM(List<KeyValuePair<PlanOutfit, string>> options, Plan plan)
+        {
+            _o = options[0].Key;
+            _plan = plan;
+            _groupKey = _o.Character + "|" + _o.Part;
+            if (!plan.GroupNames.ContainsKey(_groupKey)) plan.GroupNames[_groupKey] = Core.GroupDefault(plan);
+            foreach (var kv in options) Options.Add(new OptionVM(kv.Key, kv.Value));
+        }
+        public List<OptionVM> Options { get; } = new List<OptionVM>();
+        public Visibility OptionsVisibility => Options.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        public string OptionsCount => "· " + Options.Count;
         public RowVM(PlanOutfit o, string optName, bool multi)
         {
             _o = o;
-            if (o.Variants.Count > 1)
+            foreach (var pv in o.Pickable) PickRows.Add(new PickVM(pv, this));
+            if (o.Pickable.Count > 1) { /* the outfits of a pack have their own panel below */ }
+            else if (o.Variants.Count > 1)
             {
-                Meta.Add(new MetaItem { Text = o.Variants.Count + " story stages:" });
+                // the stages of the campaign (clean/dirty, jacket/tank top...) or separate costumes (Noir, Elza Walker)
+                bool stages = o.Variants.All(v => System.Text.RegularExpressions.Regex.IsMatch(v,
+                    @"clean|dirty|dirtier|jacket|tank top|police|casual|injured|stage", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+                Meta.Add(new MetaItem { Text = o.Variants.Count + (stages ? " story stages:" : " versions:") });
                 foreach (var v in o.Variants) Meta.Add(new MetaItem { Text = v, IsPill = true });
             }
             else if (o.Variants.Count == 1 && o.Variants[0] != "all stages" && o.Variants[0] != "extra")
@@ -40,8 +119,39 @@ namespace CustomOutfits
         }
         public string Part => _o.Part;
         public string PartLabel => _o.PartName.ToUpperInvariant();
-        public string Name { get => _o.Name; set => _o.Name = value; }
+        public string Name
+        {
+            get => _groupKey != null ? _plan.GroupNames[_groupKey] : _o.Name;
+            set
+            {
+                if (_groupKey != null) { _plan.GroupNames[_groupKey] = value; return; }
+                _o.Name = value;
+                foreach (var p in PickRows) p.Refresh();
+            }
+        }
         public List<MetaItem> Meta { get; } = new List<MetaItem>();
+        // body of a pack: one row per outfit (several outfits that replace different game costumes)
+        public List<PickVM> PickRows { get; } = new List<PickVM>();
+        public Visibility PickVisibility => PickRows.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        public string PickCount => "· " + PickRows.Count;
+        public bool IsBody => _o.Part == "body";
+        public Visibility BodyVisibility => IsBody ? Visibility.Visible : Visibility.Collapsed;
+        public string PickTitle => IsBody ? "OUTFITS IN THIS MOD" : "OPTIONS IN THIS MOD";
+        public bool EachEntry
+        {
+            get => _o.EachEntry;
+            set
+            {
+                _o.EachEntry = value;
+                foreach (var p in PickRows) p.Refresh();
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(PickHint)));
+            }
+        }
+        public string PickHint => !IsBody
+            ? "In the Wardrobe menu, this " + _o.PartName.ToLowerInvariant() + " is one entry with these options. Left on automatic, each one goes with the costume it replaces; picked there, the chosen one goes with any costume. Empty name = the grey one."
+            : EachEntry
+            ? "Each outfit gets its own entry in the game's costume menu, with this name and picture. Empty name = the grey one."
+            : "The game's costume menu gets one entry for this mod (it follows the story and uses the mod's picture). The names are used in the Wardrobe menu. Empty name = the grey one.";
     }
 
     public sealed class GroupVM
@@ -61,14 +171,21 @@ namespace CustomOutfits
             Plan = plan;
             RemoveVisibility = canRemove ? Visibility.Visible : Visibility.Collapsed;
             bool multi = plan.Options.Count > 1;
+            // several outfits of the same part in one package (the colours of a hair mod): in the game they are options of one entry
+            var sameKind = plan.Options.SelectMany(p => p.Outfits.Select(o => new KeyValuePair<PlanOutfit, string>(o, p.Name)))
+                .GroupBy(kv => kv.Key.Character + "|" + kv.Key.Part).Where(x => x.Count() > 1)
+                .ToDictionary(x => x.Key, x => x.ToList());
+            var grouped = new HashSet<string>();
             foreach (var opt in plan.Options)
             {
                 foreach (var o in opt.Outfits)
                 {
+                    OutfitCount++;
+                    string kind = o.Character + "|" + o.Part;
+                    if (sameKind.ContainsKey(kind) && !grouped.Add(kind)) continue; // already in its group's row
                     var g = Groups.FirstOrDefault(x => x.Name == o.CharacterName);
                     if (g == null) Groups.Add(g = new GroupVM { Name = o.CharacterName });
-                    g.Rows.Add(new RowVM(o, opt.Name, multi));
-                    OutfitCount++;
+                    g.Rows.Add(sameKind.TryGetValue(kind, out var opts) ? new RowVM(opts, plan) : new RowVM(o, opt.Name, multi));
                 }
             }
             foreach (var g in Groups)
@@ -182,11 +299,13 @@ namespace CustomOutfits
             WindowStartupLocation = WindowStartupLocation.Manual;
             Left = -20000; Top = -20000;
             ShowInTaskbar = false;
+            if (int.TryParse(Environment.GetEnvironmentVariable("CO_SNAPSHOT_HEIGHT"), out int tall) && tall > 0) { MaxHeight = tall; Height = tall; }
             Loaded += async (s, e) =>
             {
                 string input = Environment.GetEnvironmentVariable("CO_SNAPSHOT_INPUT");
                 if (!string.IsNullOrEmpty(input)) await OpenMods(input.Split('|'), false);
                 await Task.Delay(300);
+                if (Environment.GetEnvironmentVariable("CO_SNAPSHOT_END") != null) { PlanView.ScrollToEnd(); await Task.Delay(200); }
                 var root = (FrameworkElement)Content;
                 var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bmp.Render(root);
@@ -430,6 +549,24 @@ namespace CustomOutfits
             if (Tex.LoadRgba(dlg.FileName, 64, out _, out _) == null) { ShowToast("This image could not be read."); return; }
             vm.Plan.CustomPicture = dlg.FileName;
             RenderPlans();
+        }
+
+        private void VariantPicture_Click(object sender, RoutedEventArgs e)
+        {
+            if (!((sender as Button)?.Tag is PickVM pv)) return;
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Picture for \"" + pv.Slot + "\" in the game's costume menu",
+                Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            if (Tex.LoadRgba(dlg.FileName, 64, out _, out _) == null) { ShowToast("This image could not be read."); return; }
+            pv.SetPicture(dlg.FileName);
+        }
+
+        private void VariantPictureReset_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.Tag is PickVM pv) pv.SetPicture(null);
         }
 
         private void DefaultPicture_Click(object sender, RoutedEventArgs e)

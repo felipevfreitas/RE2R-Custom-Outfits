@@ -82,6 +82,9 @@ namespace CustomOutfits
         // names of extra costumes (characters without a story)
         public static readonly Dictionary<string, Dictionary<int, string>> MenuNames = new Dictionary<string, Dictionary<int, string>>
         {
+            // DLC costumes of the game menu (Claire: a Noir, b Military, c Elza Walker, as in the game's costume list; d is not confirmed)
+            ["pl1000"] = new Dictionary<int, string> { [10] = "Noir", [11] = "Military", [12] = "Elza Walker", [13] = "'98" },
+            ["pl0000"] = new Dictionary<int, string> { [13] = "Noir" },
             ["pl4100"] = new Dictionary<int, string> { [0] = "Tofu", [1] = "Uiro", [2] = "Annin Tofu", [3] = "Konnyaku", [4] = "Flan" },
         };
 
@@ -162,14 +165,17 @@ namespace CustomOutfits
             if (pairs.Count == 0) return null;
             if (!Stages.TryGetValue(group, out var byFam)) return "stage " + (pairs.Min(p => p.Item2) + 1);
             var defs = pairs
-                .Select((p, order) => new { p.Item2, order, d = byFam.TryGetValue(p.Item1, out var arr) && p.Item2 < arr.Length ? arr[p.Item2] : null })
+                .Select((p, order) => new { p.Item2, order, fam = p.Item1, d = byFam.TryGetValue(p.Item1, out var arr) && p.Item2 < arr.Length ? arr[p.Item2] : null })
                 .Where(x => x.d != null)
                 .OrderBy(x => x.d.Dirt).ThenBy(x => x.Item2).ThenBy(x => x.order)
                 .ToList();
             if (defs.Count == 0) return null;
             var d = defs[0].d;
             string dirt = d.Dirt == 1 ? ", dirty" : d.Dirt == 2 ? ", very dirty" : "";
-            return (d.Name ?? (d.Jacket ? "Jacket" : "Tank top")) + dirt;
+            // a name shared by both families ("Jacket", "Tank top") gets the family in front: "Normal Jacket", "Alternative Tank top"
+            string prefix = d.Name == null && Families.TryGetValue(group, out var ff) && ff.Count > 1
+                ? (defs[0].fam == "alt" ? "Classic " : "") : ""; // the game calls the alternative costume "Classic"
+            return prefix + (d.Name ?? (d.Jacket ? "Jacket" : "Tank top")) + dirt;
         }
 
         /// <summary>Every group with costume prefabs in the game (pl0000..pl9900).</summary>

@@ -16,6 +16,8 @@ namespace CustomOutfits
     public sealed class Variant
     {
         public string Key, Replaces, Mdf, Mesh, SkinMesh, Chain, Label;
+        public string Custom;                  // name the user typed in the converter (else the game menu shows "<outfit> - <label>")
+        public string Thumb; public int ThumbW, ThumbH; public bool ThumbFull; // own picture of this outfit's game-menu entry
         public List<string> Textures = new List<string>();
         public List<int> Direct = new List<int>();
         public List<int> Costumes = new List<int>();
@@ -30,6 +32,12 @@ namespace CustomOutfits
             if (SkinMesh != null) o.Set("skin_mesh", SkinMesh);
             if (Chain != null) o.Set("chain", Chain);
             o.Set("textures", Textures).Set("direct", Direct).Set("label", Label).Set("costumes", Costumes);
+            if (!string.IsNullOrWhiteSpace(Custom)) o.Set("custom", Custom);
+            if (Thumb != null)
+            {
+                o.Set("thumbnail", Thumb).Set("thumbnail_size", new List<int> { ThumbW, ThumbH });
+                if (ThumbFull) o.Set("thumbnail_full", true);
+            }
             if (Also != null)
             {
                 var a = new JObj();
@@ -72,6 +80,12 @@ namespace CustomOutfits
         public bool DryRun;                                                    // analyze only, write nothing
         public Dictionary<string, string> Names = new Dictionary<string, string>(); // "character|part" -> name
         public string GameDir;
+        public Dictionary<string, string> VariantPictures = new Dictionary<string, string>(); // "character|part|variant key" -> image of its entry
+        public string PackageName; // name of the group when a package has several outfits of the same part
+        public Dictionary<string, string> GroupNames = new Dictionary<string, string>(); // "character|part" -> name of that group in the Wardrobe menu (wins over PackageName)
+        public HashSet<string> EachEntry = new HashSet<string>(); // "character|body": an entry per outfit in the game's costume menu
+        public Dictionary<string, string> VariantNames = new Dictionary<string, string>(); // "character|part|variant key" -> name
+        public string BaseRoot, BaseSlug; // add-on (modinfo addonfor=): the option it is for; files the add-on lacks are that option's
         public string Package; // id of the converted package: face/hair of the same mod follow its body in game
         public string Thumbnail; // image of the mod (modinfo screenshot): body thumbnail in the game's costume menu
         public bool ThumbnailForced; // Thumbnail was chosen by the user: used even if the mod has a costume-menu picture
@@ -120,6 +134,7 @@ namespace CustomOutfits
             int off = int.Parse(baseName.Substring(2, 4)) - groupNum;
             if (off >= 0 && off < 50) return "body";
             if (off >= 50 && off < 70) return "face";
+            if (off == 99) return "face"; // pl1099: the default face material (face_default / costume b prefabs)
             if (off >= 70 && off < 100) return "hair";
             return null;
         }
@@ -208,6 +223,16 @@ namespace CustomOutfits
                     Collect(srcMain, pl, OsPath(modRoot, $"natives/{pl}", virtGroup));
                     Collect(srcStream, pl, OsPath(modRoot, $"natives/{pl}/streaming", virtGroup));
                 }
+                // the option this one is an add-on for: its files (relative to the group folder), and where they end up in the package
+                var baseMain = new Dictionary<string, List<string>>();
+                string baseVirt = opts.BaseRoot != null && opts.BaseSlug != null ? $"custom_outfits/{character}/{opts.BaseSlug}" : null;
+                if (baseVirt != null)
+                    foreach (var pl in Platforms)
+                        foreach (var r in ListFiles(OsPath(opts.BaseRoot, $"natives/{pl}", virtGroup)))
+                        {
+                            if (!baseMain.TryGetValue(r, out var bl)) baseMain[r] = bl = new List<string>();
+                            bl.Add(pl);
+                        }
                 var groupPlats = plats.Where(pl => srcMain.Values.Any(l => l.Contains(pl)) || srcStream.Values.Any(l => l.Contains(pl))).ToList();
                 var main = srcMain.Keys.OrderBy(r => r, StringComparer.Ordinal).ToList();
                 var streaming = srcStream.Keys.OrderBy(r => r, StringComparer.Ordinal).ToList();
@@ -219,6 +244,13 @@ namespace CustomOutfits
                     if (Regex.IsMatch(rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase))
                         remap[$"{virtGroup}/{StripVer(rel)}".ToLowerInvariant()] = $"{newVirtBase}/{StripVer(rel)}".ToLowerInvariant();
                 }
+                // textures the add-on needs from the option it is for (it does not bring them): the custom path of that option
+                foreach (var rel in baseMain.Keys)
+                    if (Regex.IsMatch(rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase))
+                    {
+                        string vk = $"{virtGroup}/{StripVer(rel)}".ToLowerInvariant();
+                        if (!remap.ContainsKey(vk)) remap[vk] = $"{baseVirt}/{StripVer(rel)}".ToLowerInvariant();
+                    }
                 // textures the mod keeps outside the character folder (e.g. natives/x64/Savina/*.tex):
                 // copied to <slug>/_ext/<path> when an mdf2 of this group references them
                 var extUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -256,10 +288,22 @@ namespace CustomOutfits
                 string Has(string rel, string pattern) =>
                     main.FirstOrDefault(r => PosixDir(r) == rel && Regex.IsMatch(PosixBase(r), pattern, RegexOptions.IgnoreCase));
 
-                foreach (var dir in dirs.OrderBy(d => d, StringComparer.Ordinal))
+                // Units: normally the files of a folder are named after it (pl1070/pl1070.mdf2). Some mods put a part under another
+                // folder (pl1079/pl1070.mdf2: the hair of costume c): the unit is then named after its files.
+                var units = new List<(string Dir, string Bas)>();
+                foreach (var d in dirs.OrderBy(d => d, StringComparer.Ordinal))
                 {
-                    string bas = PosixBase(dir);
-                    if (!Regex.IsMatch(bas, @"^pl\d{4}(_\d+)?$", RegexOptions.IgnoreCase)) continue;
+                    string folder = PosixBase(d);
+                    if (!Regex.IsMatch(folder, @"^pl\d{4}(_\d+)?$", RegexOptions.IgnoreCase)) continue;
+                    var own = main.Where(r => PosixDir(r) == d)
+                        .Select(r => Regex.Match(PosixBase(r), @"^(pl\d{4}(?:_\d+)?)\.(?:mdf2|mesh)\.\d+$", RegexOptions.IgnoreCase))
+                        .Where(m => m.Success).Select(m => m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    // (a folder can hold more than one: pl1099/pl1099.mdf2 is the default face, pl1099/pl1000.mdf2 the body of costume c)
+                    if (own.Count == 0) units.Add((d, folder));
+                    else foreach (var n in own) if (PartOf(n, groupNum) != null) units.Add((d, n));
+                }
+                foreach (var (dir, bas) in units)
+                {
                     string part = PartOf(bas, groupNum);
                     if (part == null) { report.Warnings.Add($"{character} {dir}: unknown part, skipped"); continue; }
                     string esc = Regex.Escape(bas);
@@ -299,8 +343,12 @@ namespace CustomOutfits
                     string modMesh = Has(dir, $"^{esc}\\.mesh\\.\\d+$");
                     string parentMesh = parentDir != null ? Has(parentDir, $"^{Regex.Escape(parentBase)}\\.mesh\\.\\d+$") : null;
                     string mesh = null;
+                    // add-on: the mesh of the option it is for (the add-on only brings the material)
+                    string baseMesh = baseVirt != null && modMesh == null && parentMesh == null
+                        ? baseMain.Keys.FirstOrDefault(r => PosixDir(r) == dir && Regex.IsMatch(PosixBase(r), $"^{esc}\\.mesh\\.\\d+$", RegexOptions.IgnoreCase)) : null;
                     if (modMesh != null) mesh = $"{newVirtBase}/{dir}/{bas}.mesh";
                     else if (parentMesh != null) mesh = $"{newVirtBase}/{parentDir}/{parentBase}.mesh";
+                    else if (baseMesh != null) mesh = $"{baseVirt}/{dir}/{bas}.mesh";
 
                     // only create an outfit if the mod changes something in this unit
                     if (!modMdf && modMesh == null && parentMesh == null && changed == 0) continue;
@@ -321,22 +369,39 @@ namespace CustomOutfits
                         string origBase = parentBase ?? bas, origDir = parentDir ?? dir;
                         mesh = $"{virtGroup}/{origDir}/{origBase}.mesh";
                     }
-                    string chain = main.FirstOrDefault(f => Regex.IsMatch(f, $"^{esc}\\.chain\\.\\d+$", RegexOptions.IgnoreCase));
+                    // (a unit named differently from its folder, pl1099/pl1000, takes the folder's chain: pl1099.chain; a face has no chain)
+                    string folderChain = main.FirstOrDefault(f => Regex.IsMatch(f, $"^{Regex.Escape(PosixBase(dir))}\\.chain\\.\\d+$", RegexOptions.IgnoreCase));
+                    string ownChain = main.FirstOrDefault(f => Regex.IsMatch(f, $"^{esc}\\.chain\\.\\d+$", RegexOptions.IgnoreCase));
+                    string chain = part == "face" ? null : PosixBase(dir) != bas ? (folderChain ?? ownChain) : (ownChain ?? folderChain);
+                    bool chainFromBase = false;
+                    if (chain == null && baseVirt != null)
+                    {
+                        chain = baseMain.Keys.FirstOrDefault(f => Regex.IsMatch(f, $"^{esc}\\.chain\\.\\d+$", RegexOptions.IgnoreCase))
+                            ?? baseMain.Keys.FirstOrDefault(f => Regex.IsMatch(f, $"^{Regex.Escape(PosixBase(dir))}\\.chain\\.\\d+$", RegexOptions.IgnoreCase));
+                        chainFromBase = chain != null;
+                    }
                     // face: ComputeSkinning uses <base>_blend.mesh (expressions); if the mod ships one, use it
-                    string srcMesh = modMesh != null ? $"{virtGroup}/{dir}/{bas}.mesh" : parentMesh != null ? $"{virtGroup}/{parentDir}/{parentBase}.mesh" : mesh;
+                    string srcMesh = modMesh != null ? $"{virtGroup}/{dir}/{bas}.mesh" : parentMesh != null ? $"{virtGroup}/{parentDir}/{parentBase}.mesh" : baseMesh != null ? $"{virtGroup}/{dir}/{bas}.mesh" : mesh;
                     string meshDir = modMesh != null ? dir : parentMesh != null ? parentDir : null;
                     string meshBase = modMesh != null ? bas : parentBase;
                     string blend = meshDir != null ? Has(meshDir, $"^{Regex.Escape(meshBase)}_blend\\.mesh\\.\\d+$") : null;
+                    bool blendFromBase = false;
+                    if (blend == null && baseMesh != null)
+                    {
+                        blend = baseMain.Keys.FirstOrDefault(r => PosixDir(r) == dir && Regex.IsMatch(PosixBase(r), $"^{esc}_blend\\.mesh\\.\\d+$", RegexOptions.IgnoreCase));
+                        blendFromBase = blend != null;
+                        meshDir = dir;
+                    }
 
                     var v = new Variant
                     {
-                        Key = bas,
+                        Key = PosixBase(dir) == bas ? bas : PosixBase(dir) + "_" + bas, // (two units can share a name in different folders: pl1000/pl1000 and pl1099/pl1000)
                         Replaces = $"{virtGroup}/{dir}/{bas}.mdf2".ToLowerInvariant(), // original mdf2 that this variant replaces
                         Mdf = $"{newVirtBase}/{dir}/{bas}.mdf2".ToLowerInvariant(),
                         Mesh = mesh?.ToLowerInvariant(),
                         SrcMesh = srcMesh.ToLowerInvariant(),
-                        SkinMesh = blend != null ? $"{newVirtBase}/{meshDir}/{StripVer(PosixBase(blend))}".ToLowerInvariant() : null,
-                        Chain = chain != null ? $"{newVirtBase}/{StripVer(chain)}".ToLowerInvariant() : null,
+                        SkinMesh = blend != null ? $"{(blendFromBase ? baseVirt : newVirtBase)}/{meshDir}/{StripVer(PosixBase(blend))}".ToLowerInvariant() : null,
+                        Chain = chain != null ? $"{(chainFromBase ? baseVirt : newVirtBase)}/{StripVer(chain)}".ToLowerInvariant() : null,
                         Textures = rewritten.SelectMany(m => CustomTextures(m.Buf)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
                     };
                     var list = byPart.FirstOrDefault(kv => kv.Key == part).Value;
@@ -369,6 +434,10 @@ namespace CustomOutfits
                     string part = kv.Key;
                     var variants = kv.Value;
                     int def = AssignCostumes(variants, table, group, part);
+                    // names the user gave to the outfits of a pack (converter window)
+                    foreach (var vv in variants)
+                        if (opts.VariantNames != null && opts.VariantNames.TryGetValue($"{character}|{part}|{vv.Key}", out var custom) && !string.IsNullOrWhiteSpace(custom))
+                            vv.Custom = custom.Trim();
                     // other characters whose costumes use the same file (the Forgotten Soldier uses Hunk's body)
                     foreach (var g2 in AllTables(paks, gameDir))
                     {
@@ -385,9 +454,49 @@ namespace CustomOutfits
 
                     string id = $"{character}_{slug}_{part}";
                     string name = opts.Names.TryGetValue($"{character}|{part}", out var nm) && !string.IsNullOrWhiteSpace(nm) ? nm : displayName;
+                    bool each = part == "body" && opts.EachEntry.Contains(character + "|body");
+                    // a picture for each entry: the image the user chose, else the mod's own menu picture of that costume
+                    if (each && !dry)
+                        foreach (var vv in variants.Where(x => x.Direct.Count > 0))
+                        {
+                            string safe = Regex.Replace(vv.Key ?? "v", "[^a-z0-9_]", "_", RegexOptions.IgnoreCase).ToLowerInvariant();
+                            int tw = 0, th = 0;
+                            if (opts.VariantPictures.TryGetValue($"{character}|{part}|{vv.Key}", out var img) && File.Exists(img))
+                            {
+                                bool any = false;
+                                foreach (var pl in plats)
+                                {
+                                    int ver = pl == "stm" ? 34 : 10;
+                                    if (Tex.WriteThumbnail(img, OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumb_{safe}.tex.{ver}"), ver, out tw, out th)) any = true;
+                                }
+                                if (any) { vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = false; }
+                            }
+                            else
+                            {
+                                var own = MenuPictureOf(modRoot, character, vv.Direct);
+                                if (own != null)
+                                {
+                                    foreach (var (plat, file) in own)
+                                    {
+                                        string ver = Regex.Match(file, @"\.tex\.(\d+)$").Groups[1].Value;
+                                        string f = OsPath(outRoot, $"natives/{plat}/{newVirtBase}/thumb_{safe}.tex.{ver}");
+                                        Directory.CreateDirectory(Path.GetDirectoryName(f));
+                                        File.Copy(file, f, true);
+                                        var hd = new byte[12];
+                                        using (var fs = File.OpenRead(file)) fs.Read(hd, 0, 12);
+                                        tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
+                                    }
+                                    vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = true;
+                                }
+                            }
+                        }
                     var entry = new JObj().Set("id", id).Set("name", name).Set("character", character).Set("part", part)
                         .Set("version", 2).Set("package", opts.Package).Set("families", families.ToList()).Set("default", def)
                         .Set("variants", variants.Select(v => v.ToJson()).ToList());
+                    if (each) entry.Set("menu_entries", "each"); // the game's costume menu gets one entry per outfit of this body
+                    string groupName = opts.GroupNames != null && opts.GroupNames.TryGetValue(character + "|" + part, out var gn) && !string.IsNullOrWhiteSpace(gn)
+                        ? gn.Trim() : opts.PackageName;
+                    if (!string.IsNullOrWhiteSpace(groupName)) entry.Set("package_name", groupName);
                     // body: face/hair that the MOD's prefabs set for each costume (specific costume)
                     if (part == "body")
                     {
@@ -473,16 +582,43 @@ namespace CustomOutfits
         // Character code in the costume-menu picture names (ui0601_<code>_<costume>): only Leon and Claire have them.
         private static readonly Dictionary<string, string> MenuPictureChar = new Dictionary<string, string> { ["leon"] = "00", ["claire"] = "01" };
 
+        // The number in ui0601_<code>_<NN> is the entry's place in the game's costume menu, not the costume: 00 and 01 are the two
+        // story entries (normal, alternative), then the costumes the menu lists, in its order (normal, alternative, extras).
+        // Claire (checked with two mods, 2026-11-21): 02 Jacket (0), 03 Tank top (3), 04 Classic Jacket (5), 05 Classic Tank top (8),
+        // 06 Noir (a), 07 Military (b), 08 Elza Walker (c). Leon: same rule over his menu list (not checked with a mod).
+        private const int StoryNormal = 16, StoryAlt = 17; // the game's own numbers of the two story entries
+        private static readonly Dictionary<string, int[]> MenuOrder = new Dictionary<string, int[]>
+        {
+            ["claire"] = new[] { 0, 3, 5, 8, 10, 11, 12, 13 },
+            ["leon"] = new[] { 0, 1, 3, 5, 8, 10, 11, 13 },
+        };
+
+        // picture number of a game costume (or a story entry), or -1 when the menu has no entry for it (the dirty stages)
+        private static int MenuPictureIndex(string character, int costume)
+        {
+            if (costume == StoryNormal) return 0;
+            if (costume == StoryAlt) return 1;
+            if (!MenuOrder.TryGetValue(character, out var order)) return -1;
+            int i = Array.IndexOf(order, costume);
+            return i < 0 ? -1 : i + 2;
+        }
+
         /// <summary>The costume-menu picture the mod brings for the costume its game-menu entry stands for:
-        /// normal outfit = costume 0 (else 1-4), alternative = 5 (else 6-9), extra = the costume it replaces.
+        /// normal outfit = the story entry's picture (else its costumes), alternative = the same, extra = the costume it replaces.
         /// One file per platform folder (x64/stm), or null.</summary>
         private static List<(string Plat, string File)> MenuPicture(string modRoot, string character, ICollection<string> families, List<Variant> variants)
         {
-            if (!MenuPictureChar.TryGetValue(character, out var code)) return null;
             var order = new List<int>();
-            if (families.Contains("normal")) order.AddRange(new[] { 0, 1, 2, 3, 4 });
-            else if (families.Contains("alt")) order.AddRange(new[] { 5, 6, 7, 8, 9 });
+            if (families.Contains("normal")) order.AddRange(new[] { StoryNormal, 0, 1, 2, 3, 4 });
+            else if (families.Contains("alt")) order.AddRange(new[] { StoryAlt, 5, 6, 7, 8, 9 });
             else order.AddRange(variants.SelectMany(v => v.Direct).Distinct().OrderBy(c => c));
+            return MenuPictureOf(modRoot, character, order);
+        }
+
+        /// <summary>The mod's costume-menu picture for the first of these game costumes that has one.</summary>
+        private static List<(string Plat, string File)> MenuPictureOf(string modRoot, string character, IEnumerable<int> order)
+        {
+            if (!MenuPictureChar.TryGetValue(character, out var code)) return null;
             var found = new Dictionary<int, List<(string, string)>>();
             foreach (var pl in Platforms)
             {
@@ -497,7 +633,11 @@ namespace CustomOutfits
                     l.Add((pl, f));
                 }
             }
-            foreach (int c in order) if (found.TryGetValue(c, out var files)) return files;
+            foreach (int c in order)
+            {
+                int n = MenuPictureIndex(character, c);
+                if (n >= 0 && found.TryGetValue(n, out var files)) return files;
+            }
             return null;
         }
 
@@ -527,9 +667,18 @@ namespace CustomOutfits
                     var names = v.Direct.Select(c => menuNames != null && menuNames.TryGetValue(c, out var n) ? n : null).Where(n => n != null).ToList();
                     v.Label = Costumes.StageLabel(group, pairs)
                         ?? (names.Count > 0 ? string.Join(" / ", names)
-                        : v.Direct.Count > 0 ? "costume " + string.Join("/", v.Direct.Select(c => System.Convert.ToString(c, 16))) : "extra");
+                        : v.Direct.Count > 0 ? "costume " + string.Join("/", v.Direct.Select(c => System.Convert.ToString(c, 16))) : null);
+                    if (v.Label != null) v.Label = Regex.Replace(v.Label, @"costume ([0-9a-f])(?![0-9a-z])", m => "Costume " + m.Groups[1].Value.ToUpperInvariant());
                 }
             }
+            // a variant no game costume points to (pl1001_01: the same body with other material) is named after the one it belongs to
+            if (part == "body")
+                foreach (var v in variants.Where(x => x.Label == null))
+                {
+                    var pm = Regex.Match(v.Key ?? "", @"^(pl\d{4})_\d+$", RegexOptions.IgnoreCase);
+                    var parent = pm.Success ? variants.FirstOrDefault(x => string.Equals(x.Key, pm.Groups[1].Value, StringComparison.OrdinalIgnoreCase)) : null;
+                    v.Label = parent?.Label != null ? parent.Label + " (other material)" : "Extra material";
+                }
             // face/hair: only the dirt changes -> named by the order of the stage where they start
             if (part != "body")
             {
@@ -538,7 +687,7 @@ namespace CustomOutfits
                 foreach (var v in variants)
                 {
                     int r = ranked.IndexOf(v);
-                    v.Label = r < 0 ? "extra" : ranked.Count == 1 ? "all stages" : r < dirtNames.Length ? dirtNames[r] : "stage " + v.MinStage;
+                    v.Label = r < 0 ? (v.Direct.Count > 0 ? string.Join(" / ", v.Direct.Select(c => menuNames != null && menuNames.TryGetValue(c, out var nn) ? nn : "Costume " + System.Convert.ToString(c, 16).ToUpperInvariant())) : "Other") : ranked.Count == 1 ? "all stages" : r < dirtNames.Length ? dirtNames[r] : "stage " + v.MinStage;
                 }
             }
             var byStage = new Dictionary<int, int>();

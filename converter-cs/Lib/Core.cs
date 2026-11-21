@@ -15,8 +15,20 @@ using SharpCompress.Archives;
 
 namespace CustomOutfits
 {
+    /// <summary>One outfit of a body (a pack has several): the game costume it replaces and the name it will have.</summary>
+    public sealed class PlanVariant
+    {
+        public PlanOutfit Owner;
+        public string Picture; // image chosen for this entry (only used when the pack has one entry per outfit)
+        public string Key;
+        public string Slot;    // the game costume it replaces (fixed text)
+        public string Name;    // name typed by the user; empty = "<body name> - <Slot>"
+    }
+
     public sealed class PlanOutfit
     {
+        public List<PlanVariant> Pickable = new List<PlanVariant>(); // the variants a game costume points to (body: what the Specific Outfit submenu lists; face/hair: the options of the entry)
+        public bool EachEntry;   // body: one entry per outfit in the game's costume menu (else one that follows the campaign)
         public string Character, CharacterName, Part, PartName, Name;
         public List<string> Variants = new List<string>();
         public List<string> Also = new List<string>();
@@ -27,6 +39,7 @@ namespace CustomOutfits
     {
         public string Root, Name, Slug, Author, Version, Screenshot;
         public bool IsAddon; // modinfo.ini with "addonfor=": add-on (face/hair) of another option of the mod
+        public string BaseRoot, BaseSlug; // the option it is an add-on for (its files the add-on does not bring come from there)
         public List<PlanOutfit> Outfits = new List<PlanOutfit>();
         public List<string> Warnings = new List<string>();
     }
@@ -34,6 +47,7 @@ namespace CustomOutfits
     public sealed class Plan
     {
         public string Input, Extracted, Game = "re2", GameDir, BaseName, PackageName;
+        public Dictionary<string, string> GroupNames = new Dictionary<string, string>(); // "character|part" -> name in the Wardrobe menu of the outfits of that part (a package with several: the colours of a hair mod)
         public bool IsArchive;
         public string CustomPicture;   // image the user chose for the game costume menu (wins over the mod's)
         public bool HasMenuPicture;    // the mod brings its own costume-menu picture (ui0601_*_iam.tex)
@@ -296,6 +310,8 @@ namespace CustomOutfits
             };
             var usedSlugs = new HashSet<string>();
             var reports = new List<KeyValuePair<PlanOption, ConvertReport>>();
+            // name and slug of every option first: an add-on needs the slug of the option it is for
+            var metaOf = new Dictionary<string, (Dictionary<string, string> Info, string Name, string Slug)>();
             foreach (var root in roots)
             {
                 var info = ReadModinfo(root);
@@ -305,8 +321,20 @@ namespace CustomOutfits
                 string slug = slugBase + "_" + ShortHash(Path.GetFileName(input.TrimEnd('\\', '/')) + "|" + optName);
                 while (usedSlugs.Contains(slug)) slug += "_2";
                 usedSlugs.Add(slug);
+                metaOf[root] = (info, optName, slug);
+            }
+            foreach (var root in roots)
+            {
+                var (info, optName, slug) = metaOf[root];
+                // add-on: the option named by "addonfor=" (when it is in this mod)
+                string baseRoot = null, baseSlug = null;
+                if (info.TryGetValue("addonfor", out var addonFor))
+                {
+                    var b = roots.Where(r => r != root && string.Equals(metaOf[r].Info.TryGetValue("name", out var bn) ? bn.Trim() : "", addonFor.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (b.Count > 0) { baseRoot = b[0]; baseSlug = metaOf[baseRoot].Slug; }
+                }
                 ConvertReport rep;
-                try { rep = ConvertOption(game, root, null, slug, optName, new ConvertOptions { DryRun = true, GameDir = gameDir }); }
+                try { rep = ConvertOption(game, root, null, slug, optName, new ConvertOptions { DryRun = true, GameDir = gameDir, BaseRoot = baseRoot, BaseSlug = baseSlug }); }
                 catch (Exception e) { plan.Warnings.Add(optName + ": " + e.Message); continue; }
                 string shot = info.TryGetValue("screenshot", out var sc) && sc.Length > 0 && File.Exists(Path.Combine(root, sc)) ? Path.Combine(root, sc) : null;
                 var opt = new PlanOption
@@ -314,19 +342,24 @@ namespace CustomOutfits
                     Root = root, Name = optName, Slug = slug, Screenshot = shot,
                     Author = info.TryGetValue("author", out var au) ? au : "",
                     Version = info.TryGetValue("version", out var ve) ? ve : "",
-                    IsAddon = info.ContainsKey("addonfor"),
+                    IsAddon = info.ContainsKey("addonfor"), BaseRoot = baseRoot, BaseSlug = baseSlug,
                     Warnings = rep.Warnings,
                 };
                 foreach (var o in rep.Outfits)
                 {
-                    opt.Outfits.Add(new PlanOutfit
+                    var po = new PlanOutfit
                     {
                         Character = o.Character, CharacterName = CharNames.TryGetValue(o.Character, out var cn) ? cn : o.Character,
                         Part = o.Part, PartName = PartNames.TryGetValue(o.Part, out var pn) ? pn : o.Part,
                         Name = OutfitName(optName, o.Part),
                         Variants = o.VariantLabels,
+                        // body: the outfits of a pack; face/hair: the versions a pack brings for different costumes (Noir hair, Elza Walker hair)
+                        Pickable = PickableOf(o),
+                        EachEntry = o.Part == "body" && PickableOf(o).Count > 4,
                         Also = o.Also.Select(c => CharNames.TryGetValue(c, out var an) ? an : c).ToList(),
-                    });
+                    };
+                    foreach (var pv in po.Pickable) pv.Owner = po;
+                    opt.Outfits.Add(po);
                 }
                 if (opt.Outfits.Count == 0) plan.Warnings.Add(optName + ": no character outfit found (only other files), skipped.");
                 else { plan.Options.Add(opt); reports.Add(new KeyValuePair<PlanOption, ConvertReport>(opt, rep)); }
@@ -534,6 +567,38 @@ namespace CustomOutfits
 
         // ------------------------------------------------------------------ build
         /// <summary>overwrite: writes the new file and deletes the original (no backup; the user already confirmed a warning).</summary>
+        // labels of the story stages of a face/hair (dirt): not a look of its own, never an option to pick
+        private static readonly Regex StageLabel = new Regex(@"^(clean|dirty|dirtier|very dirty|all stages|stage \d+)$", RegexOptions.IgnoreCase);
+
+        /// <summary>Body: the outfits a game costume points to. Face/hair: its looks for different costumes (the Noir hair and the
+        /// Elza Walker hair of a pack), when there are 2 or more; story stages (clean/dirty) are not options.</summary>
+        // a costume the game's costume menu lists: an extra (outside the families), or a clean stage of a family
+        private static bool InGameMenu(string group, int costume)
+        {
+            var st = Costumes.StageOf(group ?? "", costume);
+            if (st == null) return true;
+            if (!Costumes.Stages.TryGetValue(group, out var byFam) || !byFam.TryGetValue(st.Item1, out var stages) || st.Item2 >= stages.Length) return true;
+            return stages[st.Item2].Dirt == 0;
+        }
+
+        private static List<PlanVariant> PickableOf(OutfitInfo o)
+        {
+            if (o.Variants == null) return new List<PlanVariant>();
+            var direct = o.Variants.Where(v => v.Direct != null && v.Direct.Count > 0).ToList();
+            if (o.Part == "body")
+                // only what the game's costume menu offers: the dirty stages (Claire 1, 2, 4) come with the campaign, never chosen
+                direct = direct.Where(v => v.Direct.Any(c => InGameMenu(o.Group, c))).ToList();
+            else
+            {
+                direct = direct.Where(v => !StageLabel.IsMatch(v.Label ?? "")).ToList();
+                if (direct.Count < 2) return new List<PlanVariant>();
+            }
+            return direct.Select(v => new PlanVariant { Key = v.Key, Slot = v.Label, Name = "" }).ToList();
+        }
+
+        /// <summary>Name of a group of options in the Wardrobe menu when the user typed none: the mod name without " (Wardrobe)".</summary>
+        public static string GroupDefault(Plan plan) => Regex.Replace(plan.PackageName ?? "", @"\s*\(Wardrobe\)\s*$", "").Trim();
+
         public static BuildResult Build(Plan plan, string outZip, bool overwrite)
         {
             string staging = TempDir("build");
@@ -548,8 +613,20 @@ namespace CustomOutfits
                 foreach (var opt in plan.Options)
                 {
                     var names = new Dictionary<string, string>();
-                    foreach (var o in opt.Outfits) names[o.Character + "|" + o.Part] = (string.IsNullOrWhiteSpace(o.Name) ? opt.Name : o.Name).Trim();
-                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, GameDir = plan.GameDir, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? opt.Screenshot ?? MainOption(plan)?.Screenshot, ThumbnailForced = plan.CustomPicture != null,
+                    var variantNames = new Dictionary<string, string>();
+                    var each = new HashSet<string>();
+                    var pictures = new Dictionary<string, string>();
+                    foreach (var o in opt.Outfits)
+                    {
+                        names[o.Character + "|" + o.Part] = (string.IsNullOrWhiteSpace(o.Name) ? opt.Name : o.Name).Trim();
+                        foreach (var pv in o.Pickable) if (!string.IsNullOrWhiteSpace(pv.Name)) variantNames[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Name.Trim();
+                        if (o.EachEntry)
+                        {
+                            each.Add(o.Character + "|" + o.Part);
+                            foreach (var pv in o.Pickable) if (pv.Picture != null) pictures[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Picture;
+                        }
+                    }
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? opt.Screenshot ?? MainOption(plan)?.Screenshot, ThumbnailForced = plan.CustomPicture != null,
                         Drawn = opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);

@@ -5,6 +5,7 @@
         WindowStartupLocation="CenterScreen" Background="{StaticResource Bg}" Foreground="{StaticResource Text}" AllowDrop="True"
         FontFamily="Segoe UI" FontSize="14" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
   <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="B2V" />
     <!-- part tag (Body / Face / Hair) -->
     <Style x:Key="PartBadge" TargetType="Border">
       <Setter Property="CornerRadius" Value="6" />
@@ -54,11 +55,43 @@
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <Border Style="{StaticResource PartBadge}">
+                    <Border Style="{StaticResource PartBadge}" VerticalAlignment="Top" Margin="0,12,0,0">
                       <TextBlock Text="{Binding PartLabel}" Style="{StaticResource PartText}" />
                     </Border>
                     <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                    <!-- one part brought several times (the colours of a hair mod): the options of one entry, named by the box above -->
+                    <Border Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Visibility="{Binding OptionsVisibility}"
+                            Background="#14FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
+                      <StackPanel>
+                        <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
+                          <TextBlock>
+                            <Run Text="OPTIONS IN THIS MOD" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
+                            <Run Text="{Binding OptionsCount, Mode=OneWay}" FontSize="11.5" Foreground="#6B6B75" />
+                          </TextBlock>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding Options}" Focusable="False" Margin="0,4,0,4">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid Margin="14,6">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="188" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                  <TextBlock Text="FROM" FontSize="10" Foreground="#6B6B75" />
+                                  <TextBlock Text="{Binding From}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding From}" Margin="0,1,0,0" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" VerticalAlignment="Center" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="In the Wardrobe menu these are one entry with the name above, and these names in its Option list."
+                                   FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" Margin="14,2,14,12" />
+                      </StackPanel>
+                    </Border>
                     <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Meta}" Margin="0,8,0,0" Focusable="False">
                       <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
@@ -78,6 +111,84 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- a pack: the outfits of this body, one per game costume it replaces -->
+                    <Border Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Visibility="{Binding PickVisibility}"
+                            Background="#14FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
+                      <StackPanel>
+                        <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
+                          <DockPanel>
+                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding EachEntry}" Content="One entry per outfit" Visibility="{Binding BodyVisibility}"
+                                      ToolTip="On: each outfit gets its own entry (and picture) in the game's costume menu.&#10;Off: one entry that follows the story, with the mod's picture." />
+                            <TextBlock VerticalAlignment="Center">
+                              <Run Text="{Binding PickTitle, Mode=OneWay}" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
+                              <Run Text="{Binding PickCount, Mode=OneWay}" FontSize="11.5" Foreground="#6B6B75" />
+                            </TextBlock>
+                          </DockPanel>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding PickRows}" Focusable="False" Margin="0,4,0,4">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid Margin="14,6">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="132" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <!-- picture of this outfit's entry (only with one entry per outfit) -->
+                                <Grid Width="44" Height="44" Margin="0,0,12,0" Visibility="{Binding PictureOn, Converter={StaticResource B2V}}">
+                                  <Button Click="VariantPicture_Click" Tag="{Binding}" Cursor="Hand" ToolTip="{Binding PictureTip}">
+                                    <Button.Template>
+                                      <ControlTemplate TargetType="Button">
+                                        <Border x:Name="T" CornerRadius="6" Background="#1AFFFFFF" BorderBrush="#3A3A44" BorderThickness="1" ClipToBounds="True">
+                                          <ContentPresenter />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="{StaticResource Accent2}" /></Trigger>
+                                        </ControlTemplate.Triggers>
+                                      </ControlTemplate>
+                                    </Button.Template>
+                                    <Grid>
+                                      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding NoPreview, Converter={StaticResource B2V}}">
+                                        <Path Data="M3,5 h18 v14 h-18 z M3,16 l5,-5 l4,4 l3,-3 l6,6 M15.5,8.5 a1.5,1.5 0 1 0 0.01,0" Stroke="#8A8A96" StrokeThickness="1.4"
+                                              StrokeLineJoin="Round" Width="18" Height="14" Stretch="Uniform" HorizontalAlignment="Center" />
+                                        <TextBlock Text="auto" FontSize="9.5" Foreground="#8A8A96" HorizontalAlignment="Center" Margin="0,2,0,0" />
+                                      </StackPanel>
+                                      <Image Source="{Binding Preview}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" />
+                                    </Grid>
+                                  </Button>
+                                  <Button Click="VariantPictureReset_Click" Tag="{Binding}" Cursor="Hand" ToolTip="Use the automatic picture"
+                                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Visibility="{Binding HasPicture, Converter={StaticResource B2V}}">
+                                    <Button.Template>
+                                      <ControlTemplate TargetType="Button">
+                                        <Border x:Name="X" Width="17" Height="17" CornerRadius="9" Background="#2A2A31" BorderBrush="#4A4A55" BorderThickness="1">
+                                          <Path Data="M0,0 L6,6 M6,0 L0,6" Stroke="#D6D6DE" StrokeThickness="1.3" Width="6" Height="6" Stretch="Fill" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="X" Property="Background" Value="{StaticResource Accent}" /></Trigger>
+                                        </ControlTemplate.Triggers>
+                                      </ControlTemplate>
+                                    </Button.Template>
+                                  </Button>
+                                </Grid>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                                  <TextBlock Text="REPLACES" FontSize="10" Foreground="#6B6B75" />
+                                  <TextBlock Text="{Binding Slot}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Slot}" Margin="0,1,0,0" />
+                                </StackPanel>
+                                <TextBox x:Name="NameBox" Grid.Column="2" VerticalAlignment="Center" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock x:Name="Hint" Grid.Column="2" Visibility="Collapsed" Text="{Binding Placeholder}" IsHitTestVisible="False" Foreground="#62626C"
+                                           VerticalAlignment="Center" Margin="11,0,10,0" TextTrimming="CharacterEllipsis" />
+                              </Grid>
+                              <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Text.Length, ElementName=NameBox}" Value="0">
+                                  <Setter TargetName="Hint" Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                              </DataTemplate.Triggers>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding PickHint}" FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" Margin="14,2,14,12" />
+                      </StackPanel>
+                    </Border>
                   </Grid>
                 </Border>
               </DataTemplate>
