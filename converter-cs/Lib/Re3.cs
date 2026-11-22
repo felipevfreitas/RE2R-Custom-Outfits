@@ -204,6 +204,20 @@ namespace CustomOutfits
                 return $"custom_outfits/{menu}/{slug}/{rest}";
             }
 
+            // A tiny texture (< 1 KB) that is fully transparent black: the "no dirt" placeholders some mods ship (8x8, old format).
+            // Loaded as they are they crashed the game; leaving them out put Jill's dirt, stretched, on the mod's mesh; the
+            // engine's NullBlack is opaque and turned the whole outfit pale. So they are rebuilt as a valid transparent texture.
+            bool BlankPlaceholder(ModFile mf)
+            {
+                string file = Os(modRoot, mf.Natives, mf.Rel);
+                if (!Regex.IsMatch(mf.Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase) || new FileInfo(file).Length >= 1024) return false;
+                try
+                {
+                    var px = TexDecode.Mip0(File.ReadAllBytes(file), out _, out _, out _);
+                    return px != null && px.Length > 0 && px.All(b => b == 0);
+                }
+                catch { return false; }
+            }
             var copied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             // copies a mod file (all its versions) to dstVirt (without version); a texture also takes its
             // high-resolution copy from streaming/ along
@@ -221,7 +235,10 @@ namespace CustomOutfits
                         if (dry) continue;
                         string path = Os(outRoot, natives, dst + ver);
                         Directory.CreateDirectory(Path.GetDirectoryName(path));
-                        File.Copy(Os(modRoot, f.Natives, f.Rel), path, true);
+                        // a blank placeholder (see BlankPlaceholder) is written again as a valid 16x16 transparent texture
+                        if (BlankPlaceholder(f) && int.TryParse(ver.TrimStart('.'), out int tv))
+                            File.WriteAllBytes(path, Tex.Build(new byte[16 * 16 * 4], 16, 16, tv, true));
+                        else File.Copy(Os(modRoot, f.Natives, f.Rel), path, true);
                     }
                 }
             }
@@ -234,9 +251,13 @@ namespace CustomOutfits
                 // remove the dirt, is left out: the material keeps the game's own texture. Those placeholders crashed the game when
                 // loaded as a resource of their own.)
                 bool IsPlaceholder(ModFile mf) => new FileInfo(Os(modRoot, mf.Natives, mf.Rel)).Length < 1024;
-                Func<string, string> mapFn = p => Has(p.ToLowerInvariant()) && Regex.IsMatch(byVirt[p.ToLowerInvariant()][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)
-                    && !byVirt[p.ToLowerInvariant()].All(IsPlaceholder)
-                    ? CustomOf(menu, p) : null;
+                // (blank placeholders are kept: CopyTo rebuilds them, see BlankPlaceholder)
+                Func<string, string> mapFn = p =>
+                {
+                    string lp = p.ToLowerInvariant();
+                    if (!Has(lp) || !Regex.IsMatch(byVirt[lp][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)) return null;
+                    return byVirt[lp].All(f => IsPlaceholder(f) && !BlankPlaceholder(f)) ? null : CustomOf(menu, p);
+                };
 
                 var byPart = new Dictionary<string, List<Variant>>();
                 var variantModel = new Dictionary<Variant, Model>();

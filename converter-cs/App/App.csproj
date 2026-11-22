@@ -8,7 +8,7 @@
     <AssemblyName>Wardrobe-Converter</AssemblyName>
     <Product>Wardrobe Converter</Product>
     <AssemblyTitle>Wardrobe Converter</AssemblyTitle>
-    <Version>1.6.1</Version>
+    <Version>1.6.2</Version>
     <Description>Converts Resident Evil 2 and 3 Remake skin mods so they no longer replace the original outfits.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>none</DebugType>
