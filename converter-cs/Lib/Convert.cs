@@ -17,6 +17,7 @@ namespace CustomOutfits
     {
         public string Key, Replaces, Mdf, Mesh, SkinMesh, Chain, Label;
         public string Custom;                  // name the user typed in the converter (else the game menu shows "<outfit> - <label>")
+        internal List<string> DlcSwapped = new List<string>();   // textures nowhere in this game (a DLC that isn't installed): swapped for neutral ones
         public string Thumb; public int ThumbW, ThumbH; public bool ThumbFull; // own picture of this outfit's game-menu entry
         public List<string> Textures = new List<string>();
         public List<int> Direct = new List<int>();
@@ -73,6 +74,9 @@ namespace CustomOutfits
         public List<OutfitInfo> Outfits = new List<OutfitInfo>();
         public int Copied;
         public List<string> Warnings = new List<string>();
+        // outfits whose DLC-only textures were swapped for neutral ones (part, outfit label, texture names): reported once for the
+        // whole mod (Core.DlcSwapWarning), not once per outfit
+        public List<(string Part, string Label, List<string> Textures)> DlcSwaps = new List<(string, string, List<string>)>();
     }
 
     public sealed class ConvertOptions
@@ -97,6 +101,19 @@ namespace CustomOutfits
         // mdf2 versions: "10" = non-RT build (DX11), "21" = RT build (DX12, Steam default).
         // Each file keeps the version it came with; an mdf2 missing from the mod is written in every version the pak has.
         public static readonly string[] MdfVers = { "10", "21" };
+        private static readonly string[] MeshVers = { "1808312334", "2109108288" }; // non-RT, RT
+        private static readonly string[] TexVers = { "10", "34" };                  // non-RT, RT
+
+        // the engine's neutral texture of the same kind (all in the game itself): normal/roughness, occlusion, a mask (black = no
+        // effect), else white
+        private static string NeutralTexture(string lp)
+        {
+            string name = Path.GetFileName(lp);
+            if (Regex.IsMatch(name, @"_nrm", RegexOptions.IgnoreCase)) return "systems/rendering/NullNormalRoughness.tex";
+            if (Regex.IsMatch(name, @"_atos", RegexOptions.IgnoreCase)) return "systems/rendering/NullATOS.tex";
+            if (Regex.IsMatch(name, @"_msk|mask", RegexOptions.IgnoreCase)) return "systems/rendering/NullBlack.tex";
+            return "systems/rendering/NullWhite.tex";
+        }
         // platform folders under natives/: "x64" (non-RT build) and "stm" (RT build). Mods may use either, or both.
         public static readonly string[] Platforms = { "x64", "stm" };
 
@@ -254,6 +271,19 @@ namespace CustomOutfits
                 // textures the mod keeps outside the character folder (e.g. natives/x64/Savina/*.tex):
                 // copied to <slug>/_ext/<path> when an mdf2 of this group references them
                 var extUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                // textures a material takes from the game that are nowhere in this game (a DLC costume's that isn't installed, like
+                // the Military wet mask in "TFD Nell TFO", 2026-11-22): the game never loads them and the whole outfit stays
+                // untextured. They are swapped for the engine's neutral texture of the same kind, so the outfit works and only
+                // that detail is lost. A player who has the DLC installed (its pak in the game folder) keeps the original ones.
+                // (A runtime fallback was tried first: the outfit showed untextured ~15 s before switching.) DLC files are never
+                // copied into a package.
+                var absentTex = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                var dlcSwapped = new List<string>();
+                bool AbsentFromGame(string lp)
+                {
+                    if (absentTex.TryGetValue(lp, out var r)) return r;
+                    return absentTex[lp] = !TexVers.Any(ver => paks.ExistsAny($"natives/x64/{lp}.{ver}") || paks.ExistsAny($"natives/x64/streaming/{lp}.{ver}"));
+                }
                 Func<string, string> mapFn = p =>
                 {
                     string lp = p.ToLowerInvariant();
@@ -262,6 +292,11 @@ namespace CustomOutfits
                     {
                         extUsed.Add(lp);
                         return $"{newVirtBase}/_ext/{lp}";
+                    }
+                    if (lp.EndsWith(".tex") && !lp.StartsWith("custom_outfits/") && !lp.StartsWith("systems/") && AbsentFromGame(lp))
+                    {
+                        dlcSwapped.Add(p);
+                        return NeutralTexture(lp);
                     }
                     return null;
                 };
@@ -315,7 +350,16 @@ namespace CustomOutfits
                             mdfs.Add((pl, f.Substring(f.LastIndexOf('.') + 1), File.ReadAllBytes(OsPath(modRoot, $"natives/{pl}", virtGroup, f))));
                     bool modMdf = mdfs.Count > 0;
                     string mdfSource = modMdf ? "mod" : "pak";
-                    if (!modMdf)
+                    // an add-on that brings only textures (the colours of "TFD Nell TFO"): the material of the option it is for, which
+                    // is what the original mod uses once both are installed (its textures are mapped to the add-on's own below)
+                    if (!modMdf && baseVirt != null)
+                    {
+                        foreach (var f in baseMain.Keys.Where(r => PosixDir(r) == dir && Regex.IsMatch(PosixBase(r), $"^{esc}\\.mdf2\\.\\d+$", RegexOptions.IgnoreCase)))
+                            foreach (var pl in baseMain[f])
+                                mdfs.Add((pl, f.Substring(f.LastIndexOf('.') + 1), File.ReadAllBytes(OsPath(opts.BaseRoot, $"natives/{pl}", virtGroup, f))));
+                        if (mdfs.Count > 0) mdfSource = "base";
+                    }
+                    if (mdfs.Count == 0)
                     {
                         // every version the game has, written to every platform folder the mod uses
                         foreach (var ver in MdfVers)
@@ -325,12 +369,13 @@ namespace CustomOutfits
                         }
                         if (mdfs.Count == 0)
                         {
-                            report.Warnings.Add($"{character} {dir}: original material (mdf2) not found in the game files. Another mod installed in Fluffy probably replaces it: uninstall it and try again.");
+                            report.Warnings.Add($"{character} {dir}: the mod doesn't bring this material (mdf2) and your game doesn't have it: it belongs to a DLC costume you don't own (that part can't work without it), or another mod installed in Fluffy replaces it (uninstall it and try again).");
                             continue;
                         }
                     }
                     int changed = 0;
                     var rewritten = new List<(string Plat, string Ver, byte[] Buf)>();
+                    dlcSwapped.Clear();
                     foreach (var m in mdfs)
                     {
                         rewritten.Add((m.Plat, m.Ver, Mdf2.RewriteTexturePaths(m.Buf, mapFn, out int ch)));
@@ -403,6 +448,7 @@ namespace CustomOutfits
                         SkinMesh = blend != null ? $"{(blendFromBase ? baseVirt : newVirtBase)}/{meshDir}/{StripVer(PosixBase(blend))}".ToLowerInvariant() : null,
                         Chain = chain != null ? $"{(chainFromBase ? baseVirt : newVirtBase)}/{StripVer(chain)}".ToLowerInvariant() : null,
                         Textures = rewritten.SelectMany(m => CustomTextures(m.Buf)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                        DlcSwapped = dlcSwapped.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                     };
                     var list = byPart.FirstOrDefault(kv => kv.Key == part).Value;
                     if (list == null) { list = new List<Variant>(); byPart.Add(new KeyValuePair<string, List<Variant>>(part, list)); }
@@ -438,6 +484,22 @@ namespace CustomOutfits
                     foreach (var vv in variants)
                         if (opts.VariantNames != null && opts.VariantNames.TryGetValue($"{character}|{part}|{vv.Key}", out var custom) && !string.IsNullOrWhiteSpace(custom))
                             vv.Custom = custom.Trim();
+                    // files the outfit takes from the game that the game doesn't have: the mesh or textures of a DLC costume the
+                    // player doesn't own (the mod only brought what it changed). Without them that part is invisible or untextured
+                    // in game, so say so now (a player without the DLC saw "only the hair works", 2026-11-22)
+                    foreach (var vv in variants)
+                    {
+                        // (installed DLC paks count: a player with the DLC has its mesh)
+                        var missing = new List<string>();
+                        if (vv.Mesh != null && !vv.Mesh.StartsWith("custom_outfits/") && !MeshVers.Any(ver => paks.ExistsAny($"natives/x64/{vv.Mesh}.{ver}")))
+                            missing.Add(vv.Mesh);
+                        // (missing textures are swapped for neutral ones above: only a missing mesh is left to say)
+                        if (missing.Count > 0)
+                            report.Warnings.Add($"{part} \"{vv.Custom ?? vv.Label}\": needs {missing.Count} file(s) that neither the mod nor your game has "
+                                + $"(e.g. {missing[0]}). They come from a DLC costume that isn't installed or from another mod: without it, this part will be invisible or look wrong.");
+                        if (vv.DlcSwapped.Count > 0)
+                            report.DlcSwaps.Add((part, vv.Custom ?? vv.Label, vv.DlcSwapped.Select(Path.GetFileName).ToList()));
+                    }
                     // other characters whose costumes use the same file (the Forgotten Soldier uses Hunk's body)
                     foreach (var g2 in AllTables(paks, gameDir))
                     {
@@ -494,6 +556,9 @@ namespace CustomOutfits
                         .Set("version", 2).Set("package", opts.Package).Set("families", families.ToList()).Set("default", def)
                         .Set("variants", variants.Select(v => v.ToJson()).ToList());
                     if (each) entry.Set("menu_entries", "each"); // the game's costume menu gets one entry per outfit of this body
+                    // an add-on (modinfo addonfor=, the colours of a skin): an option of the outfit it is for, never an entry of its own
+                    // in the game's costume menu (the script groups it with that outfit by package)
+                    if (opts.BaseRoot != null) entry.Set("addon", true);
                     string groupName = opts.GroupNames != null && opts.GroupNames.TryGetValue(character + "|" + part, out var gn) && !string.IsNullOrWhiteSpace(gn)
                         ? gn.Trim() : opts.PackageName;
                     if (!string.IsNullOrWhiteSpace(groupName)) entry.Set("package_name", groupName);
@@ -612,11 +677,13 @@ namespace CustomOutfits
             if (families.Contains("normal")) order.AddRange(new[] { StoryNormal, 0, 1, 2, 3, 4 });
             else if (families.Contains("alt")) order.AddRange(new[] { StoryAlt, 5, 6, 7, 8, 9 });
             else order.AddRange(variants.SelectMany(v => v.Direct).Distinct().OrderBy(c => c));
-            return MenuPictureOf(modRoot, character, order);
+            // a mod with a single costume-menu picture under another number (TFD Nell TFO replaces Military, 07, but names its
+            // picture 06): that picture is still the outfit's, rather than the mod's screenshot cropped
+            return MenuPictureOf(modRoot, character, order, true);
         }
 
         /// <summary>The mod's costume-menu picture for the first of these game costumes that has one.</summary>
-        private static List<(string Plat, string File)> MenuPictureOf(string modRoot, string character, IEnumerable<int> order)
+        private static List<(string Plat, string File)> MenuPictureOf(string modRoot, string character, IEnumerable<int> order, bool loneFallback = false)
         {
             if (!MenuPictureChar.TryGetValue(character, out var code)) return null;
             var found = new Dictionary<int, List<(string, string)>>();
@@ -638,7 +705,7 @@ namespace CustomOutfits
                 int n = MenuPictureIndex(character, c);
                 if (n >= 0 && found.TryGetValue(n, out var files)) return files;
             }
-            return null;
+            return loneFallback && found.Count == 1 ? found.Values.First() : null;
         }
 
         // Decides which game costumes each variant is used in:

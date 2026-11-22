@@ -335,6 +335,8 @@ namespace CustomOutfits
 
         private void Show(UIElement view)
         {
+            // leaving the result screen: its notes go with it (they don't close by themselves)
+            if (DoneView.Visibility == Visibility.Visible && view != DoneView) { _toastTimer.Stop(); Toast.Visibility = Visibility.Collapsed; }
             foreach (var v in new UIElement[] { EmptyView, PlanView, DoneView }) v.Visibility = v == view ? Visibility.Visible : Visibility.Collapsed;
             Actions.Visibility = view == PlanView ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -347,12 +349,17 @@ namespace CustomOutfits
             if (on) sb.Begin(this, true); else sb.Stop(this);
         }
 
-        private void ShowToast(string msg)
+        // warning = only notes, nothing went wrong: orange like the warnings box of the list (red reads as a failure at a glance)
+        // stay = the notes of the result screen: they stay until that screen is left (they vanished before anyone read them)
+        private void ShowToast(string msg, bool warning = false, bool stay = false)
         {
+            Toast.Background = new SolidColorBrush(warning ? Color.FromRgb(0x22, 0x1D, 0x12) : Color.FromRgb(0x2A, 0x14, 0x18));
+            Toast.BorderBrush = new SolidColorBrush(warning ? Color.FromRgb(0x5A, 0x44, 0x15) : Color.FromRgb(0x6B, 0x25, 0x31));
+            ToastText.Foreground = new SolidColorBrush(warning ? Color.FromRgb(0xE6, 0xD3, 0xA8) : Color.FromRgb(0xFF, 0xD5, 0xDB));
             ToastText.Text = msg;
             Toast.Visibility = Visibility.Visible;
             _toastTimer.Stop();
-            _toastTimer.Start();
+            if (!stay) _toastTimer.Start();
         }
 
         // ------------------------------------------------------------ game folders
@@ -688,7 +695,7 @@ namespace CustomOutfits
             var notes = new List<string>();
             if (failed.Count > 0) notes.Add("Not converted:\n" + string.Join("\n", failed));
             if (warnings.Count > 0) notes.Add("Warnings:\n" + string.Join("\n", warnings));
-            if (notes.Count > 0) ShowToast(string.Join("\n\n", notes));
+            if (notes.Count > 0) ShowToast(string.Join("\n\n", notes), warning: failed.Count == 0, stay: true);
             if (_plans.Count > 0) RenderPlans(); // the ones that failed stay loaded
             Show(DoneView);
         }

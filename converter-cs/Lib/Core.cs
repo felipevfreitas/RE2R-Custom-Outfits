@@ -310,6 +310,7 @@ namespace CustomOutfits
             };
             var usedSlugs = new HashSet<string>();
             var reports = new List<KeyValuePair<PlanOption, ConvertReport>>();
+            var dlcSwaps = new List<(string Option, string Part, string Label, List<string> Textures)>();
             // name and slug of every option first: an add-on needs the slug of the option it is for
             var metaOf = new Dictionary<string, (Dictionary<string, string> Info, string Name, string Slug)>();
             foreach (var root in roots)
@@ -365,7 +366,9 @@ namespace CustomOutfits
                 if (opt.Outfits.Count == 0) plan.Warnings.Add(optName + ": no character outfit found (only other files), skipped.");
                 else { plan.Options.Add(opt); reports.Add(new KeyValuePair<PlanOption, ConvertReport>(opt, rep)); }
                 foreach (var w in rep.Warnings) plan.Warnings.Add(optName + ": " + w);
+                foreach (var d in rep.DlcSwaps) dlcSwaps.Add((optName, d.Part, d.Label, d.Textures));
             }
+            if (dlcSwaps.Count > 0) plan.Warnings.Add(DlcSwapWarning(dlcSwaps));
             plan.MenuPictureFile = roots.SelectMany(r => Directory.EnumerateFiles(r, "ui0601_*_iam.tex.*", SearchOption.AllDirectories))
                 .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
             plan.HasMenuPicture = plan.MenuPictureFile != null;
@@ -607,6 +610,18 @@ namespace CustomOutfits
         /// <summary>Name of a group of options in the Wardrobe menu when the user typed none: the mod name without " (Wardrobe)".</summary>
         public static string GroupDefault(Plan plan) => Regex.Replace(plan.PackageName ?? "", @"\s*\(Wardrobe\)\s*$", "").Trim();
 
+        /// <summary>One warning for every outfit of the mod whose DLC-only textures were swapped for neutral ones (it repeated, the
+        /// same, once per colour add-on).</summary>
+        public static string DlcSwapWarning(List<(string Option, string Part, string Label, List<string> Textures)> swaps)
+        {
+            var sb = new StringBuilder();
+            sb.Append("Some textures come from a DLC costume that isn't installed in your game, so they were replaced with neutral ones: these outfits work, only that small detail won't show. If you install that DLC later, convert the mod again to get them.");
+            foreach (var g in swaps.GroupBy(s => s.Option))
+                sb.Append("\n   – ").Append(g.Key).Append(": ").Append(string.Join(", ", g.Select(s => s.Part + " (" + s.Label + ")").Distinct()));
+            sb.Append("\n   Textures replaced: ").Append(string.Join(", ", swaps.SelectMany(s => s.Textures).Distinct(StringComparer.OrdinalIgnoreCase)));
+            return sb.ToString();
+        }
+
         public static BuildResult Build(Plan plan, string outZip, bool overwrite)
         {
             string staging = TempDir("build");
@@ -618,6 +633,7 @@ namespace CustomOutfits
                 string pkgDir = Path.Combine(staging, "p");
                 Directory.CreateDirectory(pkgDir);
                 var result = new BuildResult();
+                var dlcSwaps = new List<(string Option, string Part, string Label, List<string> Textures)>();
                 foreach (var opt in plan.Options)
                 {
                     var names = new Dictionary<string, string>();
@@ -638,7 +654,9 @@ namespace CustomOutfits
                         Drawn = opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);
+                    foreach (var d in rep.DlcSwaps) dlcSwaps.Add((opt.Name, d.Part, d.Label, d.Textures));
                 }
+                if (dlcSwaps.Count > 0) result.Warnings.Add(DlcSwapWarning(dlcSwaps));
                 // modinfo.ini for Fluffy: screenshot/version/author from the mod's main option (in ReHauled, the
                 // outfit; face and hair are "addonfor"), not simply the first folder in alphabetical order
                 var first = MainOption(plan) ?? new PlanOption();
