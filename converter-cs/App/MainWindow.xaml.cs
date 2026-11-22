@@ -209,6 +209,7 @@ namespace CustomOutfits
         // picture in the game's costume menu (RE2 Leon/Claire, RE3 Jill/Carlos outfits): the user's image, else the mod's own
         // costume-menu picture, else the mod's screenshot, else one drawn from the outfit, else a placeholder
         private string Screenshot => Plan.Options.Select(o => o.Screenshot).FirstOrDefault(s => s != null);
+        private string MenuShot => Plan.Options.Select(o => o.Screenshot).FirstOrDefault(Core.FitsMenu);
         private string Drawn => (Core.MainOption(Plan)?.Outfits ?? new List<PlanOutfit>()).Concat(Plan.Options.SelectMany(o => o.Outfits))
             .Select(o => o.Drawn).FirstOrDefault(d => d != null && File.Exists(d));
         public Visibility PictureVisibility =>
@@ -217,8 +218,10 @@ namespace CustomOutfits
         public string PictureText =>
             Plan.CustomPicture != null ? "Your image: " + Path.GetFileName(Plan.CustomPicture)
             : Plan.HasMenuPicture ? "The mod's own costume menu picture."
-            : Screenshot != null ? "The mod's image."
+            : MenuShot != null ? "The mod's image."
+            : Drawn != null && Screenshot != null ? "The mod's image isn't made for the costume menu, so this picture was drawn from the outfit."
             : Drawn != null ? "The mod has no image, so this picture was drawn from the outfit."
+            : Screenshot != null ? "The mod's image."
             : "No image in this mod: the game shows a placeholder. Take a screenshot in game and choose it here.";
 
         private ImageSource _preview;
@@ -230,7 +233,7 @@ namespace CustomOutfits
                 if (_previewDone) return _preview;
                 _previewDone = true;
                 if (Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile);
-                string f = Plan.CustomPicture ?? Screenshot ?? Drawn;
+                string f = Plan.CustomPicture ?? MenuShot ?? Drawn ?? Screenshot;
                 if (f == null || !File.Exists(f)) return null;
                 try
                 {

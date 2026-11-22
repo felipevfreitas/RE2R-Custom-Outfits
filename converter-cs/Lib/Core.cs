@@ -373,7 +373,8 @@ namespace CustomOutfits
                 .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
             plan.HasMenuPicture = plan.MenuPictureFile != null;
             // no image at all in the mod: the picture of each body is drawn from the outfit itself
-            if ((game == "re2" || game == "re3") && !plan.HasMenuPicture && plan.Options.All(o => o.Screenshot == null))
+            // (also when its image is not made for the menu, see FitsMenu)
+            if ((game == "re2" || game == "re3") && !plan.HasMenuPicture && plan.Options.All(o => !FitsMenu(o.Screenshot)))
             {
                 try { if (game == "re3") DrawPicturesRe3(plan, reports); else DrawPictures(plan, reports); }
                 catch { /* no picture: the game shows a placeholder */ }
@@ -650,7 +651,7 @@ namespace CustomOutfits
                             foreach (var pv in o.Pickable) if (pv.Picture != null) pictures[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Picture;
                         }
                     }
-                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? opt.Screenshot ?? MainOption(plan)?.Screenshot, ThumbnailForced = plan.CustomPicture != null,
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? MenuShot(plan, opt), ThumbnailForced = plan.CustomPicture != null,
                         Drawn = opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);
@@ -708,6 +709,40 @@ namespace CustomOutfits
                 ?? plan.Options.SelectMany(o => o.Outfits).GroupBy(o => o.Character)
                        .OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault();
             return ch != null && FluffyCategories.TryGetValue(ch, out var c) ? "!Characters > " + c : "!Other > Models";
+        }
+
+        private static readonly Dictionary<string, bool> FitsCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The mod's image is made for the costume menu: it has a transparent background, like the game's own pictures.
+        /// Other images (a banner with the mod's name, a screenshot of a scene) end up cropped in the menu's frame, so the
+        /// picture is drawn from the outfit instead.</summary>
+        public static bool FitsMenu(string img)
+        {
+            if (img == null || !File.Exists(img)) return false;
+            lock (FitsCache)
+                if (FitsCache.TryGetValue(img, out var known)) return known;
+            bool fits = false;
+            try
+            {
+                using (var bmp = new System.Drawing.Bitmap(img))
+                    if (System.Drawing.Image.IsAlphaPixelFormat(bmp.PixelFormat))
+                        for (int y = 0; y < bmp.Height && !fits; y += Math.Max(1, bmp.Height / 64))
+                            for (int x = 0; x < bmp.Width && !fits; x += Math.Max(1, bmp.Width / 64))
+                                if (bmp.GetPixel(x, y).A < 250) fits = true;
+            }
+            catch { fits = false; }
+            lock (FitsCache) FitsCache[img] = fits;
+            return fits;
+        }
+
+        /// <summary>The image of an option for the costume menu: its screenshot (or the mod's) when it is made for the menu;
+        /// otherwise null, so the picture drawn from the outfit is used (or still the screenshot, when nothing was drawn).</summary>
+        public static string MenuShot(Plan plan, PlanOption opt)
+        {
+            string main = MainOption(plan)?.Screenshot;
+            if (FitsMenu(opt.Screenshot)) return opt.Screenshot;
+            if (FitsMenu(main)) return main;
+            bool drawn = plan.Options.Any(o => o.Outfits.Any(x => x.Drawn != null && File.Exists(x.Drawn)));
+            return drawn ? null : opt.Screenshot ?? main;
         }
 
         /// <summary>Option that represents the mod: main (no addonfor) with body and screenshot, then

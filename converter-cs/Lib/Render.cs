@@ -519,7 +519,8 @@ namespace CustomOutfits
             var a = new float[w * h];
             for (int i = 0; i < a.Length; i++) a[i] = px[i * 4 + 3] / 255f;
             var tmp = new float[w * h];
-            int r = Math.Max(2, w / 85); // (3 passes: the halo reaches about 2.5 r)
+            // (3 passes: the halo reaches about 2.5 r). The game's glow is very subtle: a thin, faint light edge
+            int r = Math.Max(1, w / 256);
             for (int pass = 0; pass < 3; pass++)
             {
                 for (int y = 0; y < h; y++) // horizontal box blur
@@ -547,10 +548,12 @@ namespace CustomOutfits
             for (int i = 0; i < w * h; i++)
             {
                 int o = i * 4;
-                double cov = px[o + 3] / 255.0, glow = Math.Min(1.0, a[i] * 1.0) * 0.85;
+                double cov = px[o + 3] / 255.0, glow = Math.Min(1.0, a[i] * 1.0) * 0.35;
                 double al = cov + (1 - cov) * glow; // the figure over the glow
                 if (al <= 0.003) { px[o] = px[o + 1] = px[o + 2] = 0; px[o + 3] = 0; continue; }
-                for (int k = 0; k < 3; k++) px[o + k] = (byte)Math.Min(255, (px[o + k] * cov + gc[k] * glow * (1 - cov)) / al);
+                // colour already multiplied by the glow (not divided by the alpha): the RE3 menu does not fully honour the
+                // transparency, and a pure white edge looked like a strong outline there
+                for (int k = 0; k < 3; k++) px[o + k] = (byte)Math.Min(255, cov >= 0.999 ? px[o + k] : px[o + k] * cov + gc[k] * glow * (1 - cov));
                 px[o + 3] = (byte)Math.Min(255, al * 255);
             }
         }

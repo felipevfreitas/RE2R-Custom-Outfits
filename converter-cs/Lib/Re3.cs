@@ -176,6 +176,18 @@ namespace CustomOutfits
                 }
             }
             bool Has(string virt) => virt != null && byVirt.ContainsKey(virt);
+            // add-on (modinfo addonfor=, like the "Color 02" of a skin): the files it does not bring come from the option it is
+            // for, which is converted into the same package (custom_outfits/<menu>/<BaseSlug>/...)
+            var baseVirt = new Dictionary<string, List<ModFile>>(StringComparer.OrdinalIgnoreCase);
+            if (opts.BaseRoot != null && opts.BaseSlug != null && Directory.Exists(Path.Combine(opts.BaseRoot, "natives")))
+                foreach (var platDir in Directory.GetDirectories(Path.Combine(opts.BaseRoot, "natives")))
+                    foreach (var rel in ListFiles(platDir))
+                    {
+                        string key = StripVer(rel).ToLowerInvariant();
+                        if (!baseVirt.TryGetValue(key, out var l)) baseVirt[key] = l = new List<ModFile>();
+                        l.Add(new ModFile { Natives = "natives/" + Path.GetFileName(platDir), Rel = rel });
+                    }
+            bool BaseHas(string virt) => virt != null && !Has(virt) && baseVirt.ContainsKey(virt);
             // the costume tables, with the files the mod's own prefabs point to (a pack in folders of its own, like ac201a/)
             var tables = ModTables(modRoot, byVirt);
 
@@ -196,12 +208,14 @@ namespace CustomOutfits
             // where a mod file goes: custom_outfits/<menu character>/<slug>/<path after character/player/ (or full path)>
             // (files from outside the character folders go to x/<code>_<name>: their full paths are long, and Windows
             // paths are limited to 260 characters, also where Fluffy extracts the package)
-            string CustomOf(string menu, string virt)
+            string CustomOf(string menu, string virt) => CustomIn(menu, slug, virt);
+            string BaseCustom(string menu, string virt) => CustomIn(menu, opts.BaseSlug, virt);
+            string CustomIn(string menu, string inSlug, string virt)
             {
                 string v = virt.ToLowerInvariant();
                 string rest = v.StartsWith(PlayerRoot + "/") ? v.Substring(PlayerRoot.Length + 1)
                     : "x/" + Hash4(v.Substring(0, Math.Max(0, v.LastIndexOf('/')))) + "_" + v.Substring(v.LastIndexOf('/') + 1);
-                return $"custom_outfits/{menu}/{slug}/{rest}";
+                return $"custom_outfits/{menu}/{inSlug}/{rest}";
             }
 
             // A tiny texture (< 1 KB) that is fully transparent black: the "no dirt" placeholders some mods ship (8x8, old format).
@@ -255,6 +269,7 @@ namespace CustomOutfits
                 Func<string, string> mapFn = p =>
                 {
                     string lp = p.ToLowerInvariant();
+                    if (BaseHas(lp)) return Regex.IsMatch(baseVirt[lp][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase) ? BaseCustom(menu, p) : null;
                     if (!Has(lp) || !Regex.IsMatch(byVirt[lp][0].Rel, @"\.tex\.\d+$", RegexOptions.IgnoreCase)) return null;
                     return byVirt[lp].All(f => IsPlaceholder(f) && !BlankPlaceholder(f)) ? null : CustomOf(menu, p);
                 };
@@ -285,8 +300,11 @@ namespace CustomOutfits
                             // the material: from the mod, else the game's
                             var mdfs = new List<(string Natives, string Ver, byte[] Buf)>();
                             bool modMdf = byVirt.TryGetValue(e.Mdf, out var mf);
+                            bool baseMdf = !modMdf && BaseHas(e.Mdf);
                             if (modMdf)
                                 foreach (var f in mf) mdfs.Add((f.Natives.ToLowerInvariant(), f.Rel.Substring(f.Rel.LastIndexOf('.') + 1), File.ReadAllBytes(Os(modRoot, f.Natives, f.Rel))));
+                            else if (baseMdf)
+                                foreach (var f in baseVirt[e.Mdf]) mdfs.Add((f.Natives.ToLowerInvariant(), f.Rel.Substring(f.Rel.LastIndexOf('.') + 1), File.ReadAllBytes(Os(opts.BaseRoot, f.Natives, f.Rel))));
                             else
                                 foreach (var ver in MdfVers)
                                 {
@@ -303,6 +321,9 @@ namespace CustomOutfits
                                 changed = Math.Max(changed, ch);
                             }
                             bool modMesh = Has(e.Mesh), modSkin = e.Skin != e.Mesh && Has(e.Skin), modChain = Has(e.Chain);
+                            // an add-on only gets the parts it changes itself (the base option's files alone don't count)
+                            if (opts.BaseRoot != null && changed > 0)
+                                Mdf2.RewriteTexturePaths(mdfs[0].Buf, p => BaseHas(p.ToLowerInvariant()) ? null : mapFn(p), out changed);
                             if (!modMdf && !modMesh && !modSkin && !modChain && changed == 0) continue; // the mod doesn't touch this part
 
                             string mdfCustom = CustomOf(menu, e.Mdf);
@@ -329,18 +350,18 @@ namespace CustomOutfits
                                 Replaces = e.Mdf,
                                 SrcMesh = e.Mesh, // (to draw the outfit)
                                 Mdf = mdfCustom,
-                                Mesh = modMesh ? CustomOf(menu, e.Mesh) : e.Mesh,
+                                Mesh = modMesh ? CustomOf(menu, e.Mesh) : BaseHas(e.Mesh) ? BaseCustom(menu, e.Mesh) : e.Mesh,
                                 // the outfit is worn over any costume, so it carries the skin mesh and the physics
                                 // (chain) of the body it was made for, not the ones of the costume the game has on
-                                SkinMesh = modSkin ? CustomOf(menu, e.Skin) : (e.Skin != null && e.Skin != e.Mesh ? e.Skin : null),
-                                Chain = modChain ? CustomOf(menu, e.Chain) : e.Chain,
+                                SkinMesh = modSkin ? CustomOf(menu, e.Skin) : e.Skin != e.Mesh && BaseHas(e.Skin) ? BaseCustom(menu, e.Skin) : (e.Skin != null && e.Skin != e.Mesh ? e.Skin : null),
+                                Chain = modChain ? CustomOf(menu, e.Chain) : BaseHas(e.Chain) ? BaseCustom(menu, e.Chain) : e.Chain,
                                 Textures = rewritten.SelectMany(x => CustomTexturesOf(x.Buf)).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(),
                             };
                             done[dkey] = v;
                             variantModel[v] = m;
                             pending[v] = writes;
                             mdfOf[v] = rewritten[0].Buf;
-                            if (modMdf || modMesh) primary.Add(v);
+                            if (modMdf || modMesh || baseMdf || BaseHas(e.Mesh)) primary.Add(v);
                             v.Direct.Add(c.Key);
                             if (!byPart.TryGetValue(part, out var list)) byPart[part] = list = new List<Variant>();
                             list.Add(v);
@@ -476,6 +497,7 @@ namespace CustomOutfits
                     string groupName = opts.GroupNames != null && opts.GroupNames.TryGetValue(menu + "|" + part, out var gn) && !string.IsNullOrWhiteSpace(gn)
                         ? gn.Trim() : opts.PackageName;
                     if (!string.IsNullOrWhiteSpace(groupName)) entry.Set("package_name", groupName);
+                    if (opts.BaseRoot != null) entry.Set("addon", true);
                     // picture for the game's costume menu (bodies): the mod's image, else the one drawn from the outfit.
                     // The RE3 menu shows pictures opaque (black background); .190820018 = non-RT, .34 = RT build.
                     if (part == "body" && !dry)
