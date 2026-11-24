@@ -8,15 +8,30 @@ namespace CustomOutfits
     /// </summary>
     public static class TexDecode
     {
-        public static byte[] Mip0(byte[] tex, out int w, out int h, out int format)
+        public static byte[] Mip0(byte[] tex, out int w, out int h, out int format) => Mip(tex, 0, out w, out h, out format);
+
+        /// <summary>Number of mips (header byte 0x0E).</summary>
+        public static int MipCount(byte[] tex) => Math.Max(1, (int)tex[0x0E]);
+
+        /// <summary>Size and place of a mip: the mip table (after the header) has 16 bytes per mip: offset (u64), row
+        /// pitch (u32), size (u32).</summary>
+        public static void MipInfo(byte[] tex, int level, out int w, out int h, out int format, out long off, out int pitch, out int size)
         {
-            w = BitConverter.ToUInt16(tex, 8);
-            h = BitConverter.ToUInt16(tex, 10);
+            w = Math.Max(1, BitConverter.ToUInt16(tex, 8) >> level);
+            h = Math.Max(1, BitConverter.ToUInt16(tex, 10) >> level);
             int version = BitConverter.ToInt32(tex, 4);
             format = BitConverter.ToInt32(tex, 0x10);
             bool rt = version > 27 && version != 190820018;
-            int table = rt ? 0x28 : 0x20;
-            long off = BitConverter.ToInt64(tex, table);
+            int table = (rt ? 0x28 : 0x20) + level * 16;
+            off = BitConverter.ToInt64(tex, table);
+            pitch = BitConverter.ToInt32(tex, table + 8);
+            size = BitConverter.ToInt32(tex, table + 12);
+        }
+
+        /// <summary>One mip as RGBA.</summary>
+        public static byte[] Mip(byte[] tex, int level, out int w, out int h, out int format)
+        {
+            MipInfo(tex, level, out w, out h, out format, out long off, out _, out _);
             var outp = new byte[w * h * 4];
             switch (format)
             {

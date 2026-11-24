@@ -59,9 +59,13 @@ namespace CustomOutfits.Cli
                             if (Environment.GetEnvironmentVariable("CO_EACH") == "1" && o.Pickable.Count > 1) o.EachEntry = true;
                             if (o.Pickable.Count > 0) Console.WriteLine($"{o.Character} {o.Part}: {string.Join(", ", o.Pickable.Select(v => v.Slot + " [" + v.Key + "]"))}{(o.EachEntry ? " (one entry each)" : "")}");
                         }
+                        // (tests) CO_PICTURE_POSE=n: drawn pictures in pose n
+                        if (int.TryParse(Environment.GetEnvironmentVariable("CO_PICTURE_POSE"), out int pn)) { Core.Redraw(p, pn); p.PictureChoice = "pose"; }
+                        if (Environment.GetEnvironmentVariable("CO_PICTURE_POSE") == "mod") p.PictureChoice = "mod";
                         var r = Core.Build(p, args[2], false);
                         Core.Cleanup(p);
                         Console.WriteLine($"ok: {r.Output} ({r.Outfits} outfits)");
+                        if (OutfitRender.GpuDevice != null) Console.WriteLine("picture drawn on: " + OutfitRender.GpuDevice);
                         foreach (var w in r.Warnings) Console.WriteLine("WARNING: " + w);
                         return 0;
                     }
@@ -116,6 +120,52 @@ namespace CustomOutfits.Cli
                         Console.WriteLine($"{parts.Count} parts, {sw.ElapsedMilliseconds} ms");
                         return 0;
                     }
+                    case "drawpkg":
+                    {
+                        // drawpkg <converted package folder> <out.png> [hq] [game_folder]: draws body + face + hair (default
+                        // variants) of a converted package; missing files come from the game. hq = experimental shading.
+                        string pkg = args[1];
+                        bool hq = args.Length > 3 && args[3] == "hq";
+                        var paks = Converter.Paks(Game(4));
+                        byte[] Get(string virt, string ver)
+                        {
+                            foreach (var pre in new[] { "streaming/", "" })
+                            {
+                                string f = Path.Combine(pkg, "natives", "x64", (pre + virt + "." + ver).Replace('/', '\\'));
+                                if (File.Exists(f)) return File.ReadAllBytes(f);
+                                var b = paks.Read(("natives/x64/" + pre + virt + "." + ver).ToLowerInvariant());
+                                if (b != null) return b;
+                            }
+                            return null;
+                        }
+                        var parts = new System.Collections.Generic.List<RenderPart>();
+                        foreach (var part in new[] { "body", "face", "hair" })
+                        {
+                            var js = Directory.GetFiles(Path.Combine(pkg, "reframework", "data", "CustomOutfits", "outfits"), "*_" + part + ".json").FirstOrDefault();
+                            if (js == null) continue;
+                            string t = File.ReadAllText(js);
+                            var mdf = System.Text.RegularExpressions.Regex.Match(t, "\"mdf\": \"([^\"]+)\"").Groups[1].Value;
+                            var mesh = System.Text.RegularExpressions.Regex.Match(t, "\"mesh\": \"([^\"]+)\"").Groups[1].Value;
+                            parts.Add(new RenderPart { Mdf = Get(mdf, "10"), Mesh = Get(mesh, "1808312334"), Texture = p => Get(p, "10") });
+                        }
+                        return DrawTest(parts, args[2], hq, Env("CO_POSE"), Env("CO_CAMERA"));
+                    }
+                    case "drawgame":
+                    {
+                        // drawgame <out.png> [hq] <part=mesh virt path:mdf2 virt path>... [game folder in CO_GAME]: draws an
+                        // original outfit from the game paks. CO_POSE=<pose.json>, CO_CAMERA=<camera.json> (from Blender).
+                        bool hq = args.Contains("hq");
+                        var paks = Converter.Paks(Env("CO_GAME") ?? Core.DetectGameDir());
+                        byte[] Get(string virt, string ver) =>
+                            paks.Read(("natives/x64/streaming/" + virt + "." + ver).ToLowerInvariant()) ?? paks.Read(("natives/x64/" + virt + "." + ver).ToLowerInvariant());
+                        var parts = new System.Collections.Generic.List<RenderPart>();
+                        foreach (var a in args.Skip(2).Where(x => x.Contains("=")))
+                        {
+                            var mm = a.Substring(a.IndexOf('=') + 1).Split(':');
+                            parts.Add(new RenderPart { Mesh = Get(mm[0], "1808312334"), Mdf = Get(mm[1], "10"), Texture = p => Get(p, "10") });
+                        }
+                        return DrawTest(parts, args[1], hq, Env("CO_POSE"), Env("CO_CAMERA"));
+                    }
                     case "texpng":
                     {
                         // co-cli texpng <file.tex.N> <out.png>: mip 0 of a texture as PNG (checking the decoder)
@@ -158,6 +208,33 @@ namespace CustomOutfits.Cli
                 Console.WriteLine("ERROR: " + e.Message);
                 return 1;
             }
+        }
+
+        private static string Env(string n) { var v = Environment.GetEnvironmentVariable(n); return string.IsNullOrEmpty(v) ? null : v; }
+
+        // test render (drawpkg / drawgame): Claire's built-in pose and framing, or a pose / camera exported from Blender
+        private static int DrawTest(System.Collections.Generic.List<RenderPart> parts, string outPng, bool hq, string poseFile, string cameraFile)
+        {
+            var opt = new RenderOptions { Hq = hq, Dark = Env("CO_LOOK") == "dark", Gpu = Env("CO_GPU") == "1" };
+            if (Env("CO_KEY") != null) opt.Key = Env("CO_KEY").Split(',').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            int w = 1024, h = 1024;
+            if (cameraFile != null)
+            {
+                string c = File.ReadAllText(cameraFile);
+                double Num(string s) => double.Parse(s.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                opt.Camera = System.Text.RegularExpressions.Regex.Match(c, "\"matrix\"\\s*:\\s*\\[([^\\]]*)\\]").Groups[1].Value.Split(',').Select(Num).ToArray();
+                opt.FovX = Num(System.Text.RegularExpressions.Regex.Match(c, "\"fov_x\"\\s*:\\s*([-0-9.eE]+)").Groups[1].Value);
+                int cw = (int)Num(System.Text.RegularExpressions.Regex.Match(c, "\"width\"\\s*:\\s*(\\d+)").Groups[1].Value);
+                int ch = (int)Num(System.Text.RegularExpressions.Regex.Match(c, "\"height\"\\s*:\\s*(\\d+)").Groups[1].Value);
+                double k = Math.Min(1.0, 1600.0 / cw); // (3x supersampling: memory)
+                w = (int)(cw * k); h = (int)(ch * k);
+            }
+            var pose = poseFile != null ? OutfitRender.PoseFromJson(File.ReadAllText(poseFile)) : OutfitRender.Pose("claire");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var rgba = OutfitRender.Render(parts, pose, w, h, opt);
+            OutfitRender.SavePng(rgba, w, h, outPng);
+            Console.WriteLine($"{parts.Count} parts, {w}x{h}, {sw.ElapsedMilliseconds} ms" + (opt.Gpu && hq ? ", gpu: " + OutfitRender.GpuDevice : ""));
+            return 0;
         }
     }
 }

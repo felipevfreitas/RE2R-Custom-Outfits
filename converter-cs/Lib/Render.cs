@@ -31,13 +31,22 @@ namespace CustomOutfits
     public sealed class RenderOptions
     {
         public bool Re3;
+        public bool Hq; // experimental: normal maps, roughness/metal, occlusion, shadows, skin (off: the shading used so far)
+        public double[] Camera; // camera matrix (4x4 row-major, game axes) from Blender, or null: automatic framing
+        public double FovX;     // its horizontal field of view (radians)
+        public bool Gpu;        // Hq: draw on the graphics card (falls back to the CPU)
+        public bool Dark;       // Hq lighting: false = studio (promotional renders, with halo), true = strong shadows, no halo
+        public double[] Key;    // direction of the key light in view space (x right, y up, z to the camera), or null: default
         public double Frame = 0.5, Fill = 0.92; // part of the height shown from the top; share of the picture the figure fills
         public static readonly RenderOptions Re2 = new RenderOptions();
         public static readonly RenderOptions Re3Jill = new RenderOptions { Re3 = true, Frame = 0.62, Fill = 0.86 };
     }
 
-    public static class OutfitRender
+    public static partial class OutfitRender
     {
+        /// <summary>Device used by the last Hq render on the GPU ("hardware: ...", "warp", "failed: ..."), for tests.</summary>
+        public static string GpuDevice;
+
         private static readonly string[] ColorTypes = { "BaseMetalMap", "BaseShiftMap", "BaseMap" };
         private static readonly Dictionary<string, Dictionary<string, double[]>> PoseCache = new Dictionary<string, Dictionary<string, double[]>>();
 
@@ -51,19 +60,76 @@ namespace CustomOutfits
                 string text = null;
                 using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + character))
                     if (s != null) using (var r = new StreamReader(s)) text = r.ReadToEnd();
-                if (text != null)
-                {
-                    p = new Dictionary<string, double[]>();
-                    // { "bones": { "<name>": { "rot": [9 numbers], "rest": [...] }, ... } }
-                    foreach (Match m in Regex.Matches(text, "\"([^\"]+)\"\\s*:\\s*\\{\\s*\"rot\"\\s*:\\s*\\[([^\\]]*)\\]"))
-                        p[m.Groups[1].Value] = m.Groups[2].Value.Split(',').Select(x => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                }
+                if (text != null) p = PoseFromJson(text);
                 PoseCache[character] = p;
                 return p;
             }
         }
 
+        /// <summary>A pose exported from Blender (blender_pose_tools.export_pose):
+        /// { "bones": { "&lt;name&gt;": { "rot": [9 numbers], "rest": [...] }, ... } }</summary>
+        public static Dictionary<string, double[]> PoseFromJson(string text)
+        {
+            var p = new Dictionary<string, double[]>();
+            foreach (Match m in Regex.Matches(text, "\"([^\"]+)\"\\s*:\\s*\\{\\s*\"rot\"\\s*:\\s*\\[([^\\]]*)\\]"))
+                p[m.Groups[1].Value] = m.Groups[2].Value.Split(',').Select(x => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            return p;
+        }
+
         public static bool HasPose(string character) => Pose(character) != null;
+
+        /// <summary>How much an albedo colour (sRGB 0..1) looks like skin: 0..1 (light-to-tan skin, clean or dirty; not grey,
+        /// black, saturated colours). Same formula in the GPU shader.</summary>
+        private static double SkinTone(double r, double g, double b)
+        {
+            if (r < 1e-3) return 0;
+            double gr = g / r, br = b / r;
+            double S(double e0, double e1, double x) { double t = Math.Min(1, Math.Max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+            return S(0.28, 0.42, r) * (1 - S(0.07, 0.14, Math.Abs(gr - 0.77))) * (1 - S(0.1, 0.2, Math.Abs(br - 0.66)));
+        }
+
+        /// <summary>Names of the thumbnail poses the user can pick (Lib/Poses/<character>.json, <character>_2.json...).</summary>
+        public static readonly string[] PoseNames = { "Arms down", "Hand on hip" };
+
+        /// <summary>Resource name of pose number n (0 = the first) of a character: "claire", "claire_2"...; null if it does not exist.</summary>
+        public static string PoseKey(string character, int n)
+        {
+            string k = n <= 0 ? character : character + "_" + (n + 1);
+            return Pose(k) != null ? k : null;
+        }
+
+        /// <summary>How many poses a character has.</summary>
+        public static int PoseCount(string character) { int n = 0; while (n < 9 && PoseKey(character, n) != null) n++; return n; }
+
+        /// <summary>The menu-picture camera of a character (embedded Lib/Poses/&lt;character&gt;_camera.json, exported from
+        /// Blender: "matrix" 4x4 row-major in game axes, "fov_y"), or null: automatic framing. Square pictures keep the
+        /// vertical field of view (head to thighs, as framed in Blender).</summary>
+        public static bool Camera(string character, out double[] matrix, out double fovY)
+        {
+            matrix = null; fovY = 0;
+            string text = null;
+            using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + character + "_camera"))
+                if (s != null) using (var r = new StreamReader(s)) text = r.ReadToEnd();
+            if (text == null) return false;
+            double Num(string x) => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+            var m = Regex.Match(text, "\"matrix\"\\s*:\\s*\\[([^\\]]*)\\]");
+            var f = Regex.Match(text, "\"fov_y\"\\s*:\\s*([-0-9.eE]+)");
+            if (!m.Success || !f.Success) return false;
+            matrix = m.Groups[1].Value.Split(',').Select(Num).ToArray();
+            fovY = Num(f.Groups[1].Value);
+            return matrix.Length == 16;
+        }
+
+        /// <summary>True if the figure touches the picture's border (cut off by a fixed camera).</summary>
+        public static bool TouchesBorder(byte[] rgba, int w, int h)
+        {
+            if (rgba == null) return false;
+            for (int i = 0; i < w; i++)
+                if (rgba[i * 4 + 3] > 40) return true; // top row and sides (the bottom is cut on purpose)
+            for (int y = 0; y < h * 9 / 10; y++)
+                if (rgba[(y * w) * 4 + 3] > 40 || rgba[(y * w + w - 1) * 4 + 3] > 40) return true;
+            return false;
+        }
 
         // ------------------------------------------------------------------ small math (4x4 row-major, m[r*4+c])
         private static readonly double[] Ident = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
@@ -96,15 +162,56 @@ namespace CustomOutfits
         private sealed class Tex
         {
             public int W, H;
-            public byte[] Px;
             public bool Alpha; // *_ALBA: alpha is a cut-out
+            public bool NoAlpha; // alpha almost all 255: the texture was saved without that channel (some mods)
+            // Hq: the .tex file and the mip that is drawn (the GPU takes its compressed blocks as they are; the RGBA pixels
+            // are decoded only if the CPU draws)
+            public byte[] File;
+            public int Level, Format;
+            private byte[] _px;
+            public byte[] Px
+            {
+                get { if (_px == null && File != null) _px = TexDecode.Mip(File, Level, out _, out _, out _); return _px; }
+                set { _px = value; }
+            }
+        }
+
+        // formats the GPU reads as they are (BC1, BC3, BC7, RGBA8); the sRGB ones are read as plain values, like the CPU
+        private static readonly int[] RawFormats = { 71, 72, 77, 78, 98, 99, 28, 29 };
+
+        /// <summary>Hq: a texture without decoding it: the largest mip not above MaxTex; the metal check reads a small mip.</summary>
+        private static Tex LoadTexLazy(byte[] file, string path)
+        {
+            if (file == null) return null;
+            try
+            {
+                int n = TexDecode.MipCount(file), level = 0;
+                TexDecode.MipInfo(file, 0, out int w, out int h, out int format, out _, out _, out _);
+                if (Array.IndexOf(RawFormats, format) < 0) return null;
+                while (level + 1 < n && Math.Max(w >> level, h >> level) > MaxTex) level++;
+                TexDecode.MipInfo(file, level, out w, out h, out _, out _, out _, out _);
+                int small = level;
+                while (small + 1 < n && Math.Max(w >> (small - level), h >> (small - level)) > 256) small++;
+                var px = TexDecode.Mip(file, small, out _, out _, out _);
+                int full = 0, seen = 0;
+                for (int q = 3; q < px.Length; q += 4) { seen++; if (px[q] >= 250) full++; }
+                return new Tex
+                {
+                    File = file, Level = level, Format = format, W = w, H = h, NoAlpha = full > seen * 0.9,
+                    Alpha = Regex.IsMatch(Regex.Replace(path, @"\.tex$", "", RegexOptions.IgnoreCase), "_alba$", RegexOptions.IgnoreCase),
+                };
+            }
+            catch { return null; }
         }
 
         private sealed class Mat
         {
-            public Tex Color, Atos;
+            public string Name;
+            public Tex Color, Atos, Nrm; // Nrm: NormalRoughnessMap (R,G normal; A roughness), only in Hq
             public double[] Tint;
-            public bool HairAlpha, Cull;
+            public bool HairAlpha, Cull, Skin, Eye; // Eye: eyeball (the key light shadow of the lids is softened, as the game eye shader does)
+            public double[] Spec1, Spec2; // hair shader (Hq): primary / secondary strand highlight colors
+            public double Sharp1, Sharp2, SpecInt, Shift; // Skin: soft light through the skin (Hq)
         }
 
         // textures above this size are reduced (the picture is 1024 pixels drawn at 3x: more detail is not visible)
@@ -132,7 +239,9 @@ namespace CustomOutfits
                             }
                     px = half; w = nw; h = nh;
                 }
-                return new Tex { W = w, H = h, Px = px, Alpha = Regex.IsMatch(Regex.Replace(path, @"\.tex$", "", RegexOptions.IgnoreCase), "_alba$", RegexOptions.IgnoreCase) };
+                int full = 0, seen = 0;
+                for (int q = 3; q < px.Length; q += 4 * 97) { seen++; if (px[q] >= 250) full++; }
+                return new Tex { W = w, H = h, Px = px, NoAlpha = full > seen * 0.9, Alpha = Regex.IsMatch(Regex.Replace(path, @"\.tex$", "", RegexOptions.IgnoreCase), "_alba$", RegexOptions.IgnoreCase) };
             }
             catch { return null; }
         }
@@ -155,7 +264,10 @@ namespace CustomOutfits
 
         // BaseColor of every material of an mdf2 v10 (entries of 0x40 bytes; param count @0x10, param headers @0x20,
         // data @0x30; param header 0x18 bytes: name (UTF-16) @0, component count @0x10, offset in the data @0x14)
-        private static double[][] BaseColors(byte[] b, bool re3 = false)
+        private static double[][] BaseColors(byte[] b, bool re3 = false) => Params(b, "BaseColor", 3, re3);
+
+        // a float parameter (at least minComp components) of every material, or null where it is missing
+        private static double[][] Params(byte[] b, string param, int minComp, bool re3 = false)
         {
             int n = BitConverter.ToUInt16(b, 6);
             var res = new double[n][];
@@ -170,10 +282,11 @@ namespace CustomOutfits
                     int nameOff = (int)BitConverter.ToInt64(b, h);
                     int end = nameOff;
                     while (end + 1 < b.Length && (b[end] | b[end + 1]) != 0) end += 2;
-                    if (Encoding.Unicode.GetString(b, nameOff, end - nameOff) != "BaseColor") continue;
+                    if (Encoding.Unicode.GetString(b, nameOff, end - nameOff) != param) continue;
                     int comp = (int)BitConverter.ToUInt32(b, h + (re3 ? 0x14 : 0x10)), rel = (int)BitConverter.ToUInt32(b, h + (re3 ? 0x10 : 0x14)); // (v13: offset first, then the count)
-                    if (comp < 3) break;
-                    res[i] = new double[] { BitConverter.ToSingle(b, (int)(pd + rel)), BitConverter.ToSingle(b, (int)(pd + rel + 4)), BitConverter.ToSingle(b, (int)(pd + rel + 8)) };
+                    if (comp < minComp) break;
+                    res[i] = new double[Math.Max(minComp, 1)];
+                    for (int c = 0; c < res[i].Length; c++) res[i][c] = BitConverter.ToSingle(b, (int)(pd + rel + c * 4));
                     break;
                 }
             }
@@ -244,6 +357,8 @@ namespace CustomOutfits
         {
             public float X0, Y0, Z0, X1, Y1, Z1, X2, Y2, Z2;   // view space
             public float[] N;                                  // 9: normals of the corners (view space)
+            public float[] T;                                  // 9: tangents of the corners (view space), Hq
+            public float Sg0, Sg1, Sg2;                        // bitangent signs
             public float U0, V0, U1, V1, U2, V2;
             public Mat M;
         }
@@ -254,6 +369,15 @@ namespace CustomOutfits
             opt = opt ?? RenderOptions.Re2;
             const int SS = 3;
             double yaw = -25 * Math.PI / 180, cy = Math.Cos(yaw), sy = Math.Sin(yaw);
+            // view space: turned around Y (default), or the space of a camera placed in Blender (x right, y up, looking
+            // down -z): v = R^T (p - camera position)
+            var cam = opt.Camera;
+            float[] View(double x, double y, double z, bool point)
+            {
+                if (cam == null) return new[] { (float)(x * cy + z * sy), (float)y, (float)(-x * sy + z * cy) };
+                if (point) { x -= cam[3]; y -= cam[7]; z -= cam[11]; }
+                return new[] { (float)(cam[0] * x + cam[4] * y + cam[8] * z), (float)(cam[1] * x + cam[5] * y + cam[9] * z), (float)(cam[2] * x + cam[6] * y + cam[10] * z) };
+            }
             var bodyS = new Dictionary<string, double[]>();
             var bodyQ = new Dictionary<string, double[]>();
             var tris = new List<Tri>();
@@ -267,10 +391,14 @@ namespace CustomOutfits
                 int matCount = b[lodHdr + 1];
                 var mats = Mdf2.Parse(part.Mdf);
                 var colors = BaseColors(part.Mdf, opt.Re3);
+                double[][] P(string name, int c) => opt.Hq ? Params(part.Mdf, name, c, opt.Re3) : null;
+                var hs1 = P("PrimalySpecularColor", 3); var hs2 = P("SecondarySpecularColor", 3);
+                var hsh1 = P("PrimalySpec_Sharpness", 1); var hsh2 = P("SecondSpec_Sharpness", 1);
+                var hsi = P("SpecularIntensity", 1); var hshift = P("SpecularShiftIntensity", 1);
                 var texCache = new Dictionary<string, Tex>(StringComparer.OrdinalIgnoreCase);
                 Tex Texture(string p)
                 {
-                    if (!texCache.TryGetValue(p, out var t)) texCache[p] = t = LoadTex(part.Texture(p), p);
+                    if (!texCache.TryGetValue(p, out var t)) texCache[p] = t = opt.Hq ? LoadTexLazy(part.Texture(p), p) : LoadTex(part.Texture(p), p);
                     return t;
                 }
                 var matOf = new Mat[matCount]; // null = not drawn
@@ -284,15 +412,22 @@ namespace CustomOutfits
                     if (ct == null) continue; // cornea, tear line...
                     var at = m.Textures.FirstOrDefault(x => x.Type == "AlphaTranslucentOcclusionSSSMap" && !Regex.IsMatch(x.Path, "null", RegexOptions.IgnoreCase));
                     var bc = colors[mi];
+                    var nt = opt.Hq ? m.Textures.FirstOrDefault(x => x.Type == "NormalRoughnessMap" && !Regex.IsMatch(x.Path, "null", RegexOptions.IgnoreCase)) : null;
                     matOf[i] = new Mat
                     {
+                        Name = name,
                         Color = Texture(ct.Path),
                         Atos = at != null ? Texture(at.Path) : null,
+                        Nrm = nt != null ? Texture(nt.Path) : null,
+                        Spec1 = hs1?[mi], Spec2 = hs2?[mi],
+                        Sharp1 = hsh1?[mi]?[0] ?? 0, Sharp2 = hsh2?[mi]?[0] ?? 0, SpecInt = hsi?[mi]?[0] ?? 0, Shift = hshift?[mi]?[0] ?? 0,
+                        Skin = !Regex.IsMatch(m.Mmtr ?? "", "hair", RegexOptions.IgnoreCase) && Regex.IsMatch(name, @"arm|hand|neck|face|skin|leg|teeth|body", RegexOptions.IgnoreCase),
                         // white on most materials; the actual color on hair, beard and brows (their textures are a light base)
                         Tint = bc != null && bc.Any(v => Math.Abs(v - 1) > 0.001) ? bc : null,
                         // hair shaders: the alpha of the color texture is the coverage (elsewhere it is metalness)
                         HairAlpha = !opt.Re3 && Regex.IsMatch(m.Mmtr ?? "", "hair", RegexOptions.IgnoreCase), // (RE3: the alpha of the hair texture is not a cut-out)
                         Cull = opt.Re3 && Regex.IsMatch(name, "Face_Mat", RegexOptions.IgnoreCase),
+                        Eye = Regex.IsMatch(name, "eye", RegexOptions.IgnoreCase) && !Regex.IsMatch(name, "lash|brow|blow", RegexOptions.IgnoreCase),
                     };
                 }
                 long lod0 = U64(U64(lodHdr + 0x40));
@@ -312,6 +447,8 @@ namespace CustomOutfits
                     double px = BitConverter.ToSingle(b, po), py = BitConverter.ToSingle(b, po + 4), pz = BitConverter.ToSingle(b, po + 8);
                     int no = (int)(vb + el[1] + i * 8);
                     double nx = (sbyte)b[no] / 127.0, ny = (sbyte)b[no + 1] / 127.0, nz = (sbyte)b[no + 2] / 127.0;
+                    double tx = (sbyte)b[no + 4] / 127.0, ty = (sbyte)b[no + 5] / 127.0, tz = (sbyte)b[no + 6] / 127.0;
+                    float sg = (sbyte)b[no + 7] < 0 ? -1 : 1;
                     if (skin != null)
                     {
                         // blended skin matrix (8 bone indices + 8 weights /255); a weight whose bone is not known counts as
@@ -337,16 +474,20 @@ namespace CustomOutfits
                             double bx = m16[0] * nx + m16[1] * ny + m16[2] * nz;
                             double by = m16[4] * nx + m16[5] * ny + m16[6] * nz;
                             double bz = m16[8] * nx + m16[9] * ny + m16[10] * nz;
-                            px = ax; py = ay; pz = az; nx = bx; ny = by; nz = bz;
+                            double ux = m16[0] * tx + m16[1] * ty + m16[2] * tz;
+                            double uy = m16[4] * tx + m16[5] * ty + m16[6] * tz;
+                            double uz = m16[8] * tx + m16[9] * ty + m16[10] * tz;
+                            px = ax; py = ay; pz = az; nx = bx; ny = by; nz = bz; tx = ux; ty = uy; tz = uz;
                         }
                     }
                     int uo = (int)(vb + el[2] + i * 4);
                     // view: turned around Y
+                    var vp = View(px, py, pz, true); var vn = View(nx, ny, nz, false); var vt = View(tx, ty, tz, false);
                     r = new float[]
                     {
-                        (float)(px * cy + pz * sy), (float)py, (float)(-px * sy + pz * cy),
-                        (float)(nx * cy + nz * sy), (float)ny, (float)(-nx * sy + nz * cy),
+                        vp[0], vp[1], vp[2], vn[0], vn[1], vn[2],
                         Half(BitConverter.ToUInt16(b, uo)), Half(BitConverter.ToUInt16(b, uo + 2)),
+                        vt[0], vt[1], vt[2], sg,
                     };
                     cache[i] = r;
                     return r;
@@ -370,6 +511,8 @@ namespace CustomOutfits
                                 X0 = a[0], Y0 = a[1], Z0 = a[2], X1 = c1[0], Y1 = c1[1], Z1 = c1[2], X2 = c2[0], Y2 = c2[1], Z2 = c2[2],
                                 N = new[] { a[3], a[4], a[5], c1[3], c1[4], c1[5], c2[3], c2[4], c2[5] },
                                 U0 = a[6], V0 = a[7], U1 = c1[6], V1 = c1[7], U2 = c2[6], V2 = c2[7],
+                                T = opt.Hq ? new[] { a[8], a[9], a[10], c1[8], c1[9], c1[10], c2[8], c2[9], c2[10] } : null,
+                                Sg0 = a[11], Sg1 = c1[11], Sg2 = c2[11],
                                 M = matOf[mat],
                             });
                         }
@@ -395,25 +538,233 @@ namespace CustomOutfits
             double fill = opt.Fill;
             double sc = Math.Min(IW * fill / (vx1 - vx0), IH * fill / (top - bottom)), cx = (vx0 + vx1) / 2, cyy = (top + bottom) / 2;
             double SHX = -0.05 * IW, SHY = 0.1 * IH;
-            double PX(double x) => IW / 2.0 + SHX + (x - cx) * sc;
-            double PY(double y) => IH / 2.0 + SHY - (y - cyy) * sc;
+            // with a camera: perspective (horizontal field of view), no automatic framing
+            double fpx = cam != null ? IW / 2.0 / Math.Tan(opt.FovX / 2) : 0;
+            double PX(double x, double z) => cam != null ? IW / 2.0 + x * fpx / Math.Max(1e-4, -z) : IW / 2.0 + SHX + (x - cx) * sc;
+            double PY(double y, double z) => cam != null ? IH / 2.0 - y * fpx / Math.Max(1e-4, -z) : IH / 2.0 + SHY - (y - cyy) * sc;
 
             // lights in view space (x right, y up, z towards the camera): a strong, slightly cool key from the front-left
             // and above, little fill, a dark ambient, a cool rim on the edges and a soft highlight. Linear space.
             double[] Norm(double x, double y, double z) { double l = Math.Sqrt(x * x + y * y + z * z); if (l == 0) l = 1; return new[] { x / l, y / l, z / l }; }
-            var KEY = Norm(-0.6, 0.55, 0.6); var FILL = Norm(0.75, 0.05, 0.45); var HALF = Norm(-0.6, 0.55, 1.6);
+            var KEY = opt.Key != null ? Norm(opt.Key[0], opt.Key[1], opt.Key[2]) : opt.Hq ? (opt.Dark ? Norm(0.72, 0.5, 0.48) : Norm(0.5, 0.55, 0.65)) : Norm(-0.6, 0.55, 0.6); /* Hq: front and a bit above (promotional renders) */ var FILL = Norm(0.75, 0.05, 0.45); var HALF = Norm(-0.6, 0.55, 1.6);
             double[] KEY_C = { 0.93, 0.97, 1.04 }, RIM_C = { 0.55, 0.65, 0.85 };
             const double L_AMB = 0.035, L_KEY = 1.5, L_FILL = 0.08, L_RIM = 0.3, L_SPEC = 0.04;
 
-            var img = new float[IW * IH * 4];
-            var zb = new float[IW * IH];
-            for (int i = 0; i < zb.Length; i++) zb[i] = -1e9f;
+            // ---- Hq (experimental): shadow map of the key light (orthographic, cut-outs respected)
+            const int SM = 2048;
+            float[] sm = null, smh = null; // solid occluders / hair (hair lets part of the light through)
+            double[] LX = null, LY = null;
+            double lx0 = 0, ly0 = 0, lsc = 1;
+            if (opt.Hq)
+            {
+                LX = Norm(KEY[2], 0, -KEY[0]); // horizontal, perpendicular to the key
+                LY = new[] { KEY[1] * LX[2] - KEY[2] * LX[1], KEY[2] * LX[0] - KEY[0] * LX[2], KEY[0] * LX[1] - KEY[1] * LX[0] };
+                double D(double[] a, double x, double y, double z) => a[0] * x + a[1] * y + a[2] * z;
+                double mx0 = 1e9, mx1 = -1e9, my0 = 1e9, my1 = -1e9;
+                foreach (var t in tris)
+                    foreach (var p in new[] { new[] { t.X0, t.Y0, t.Z0 }, new[] { t.X1, t.Y1, t.Z1 }, new[] { t.X2, t.Y2, t.Z2 } })
+                    {
+                        double a = D(LX, p[0], p[1], p[2]), c = D(LY, p[0], p[1], p[2]);
+                        mx0 = Math.Min(mx0, a); mx1 = Math.Max(mx1, a); my0 = Math.Min(my0, c); my1 = Math.Max(my1, c);
+                    }
+                lsc = (SM - 4) / Math.Max(mx1 - mx0, my1 - my0); lx0 = mx0; ly0 = my0;
+            }
+
+            // Hq on the graphics card (Direct3D 11, or Windows' software device): same scene, same shading; null = not
+            // available, drawn below on the CPU
+            float[] gpuImg = null;
+            if (opt.Hq && opt.Gpu)
+            {
+                var fr = new GpuFrame
+                {
+                    IW = IW, IH = IH, Persp = cam != null, Fpx = fpx, Cx = cx, Cy = cyy, Sc = sc, ShX = SHX, ShY = SHY,
+                    Key = KEY, Fill = FILL, KeyC = KEY_C, RimC = RIM_C, LKey = L_KEY, MnY = mnY, MxY = mxY, Dark = opt.Dark,
+                    LX = LX, LY = LY, Lx0 = lx0, Ly0 = ly0, Lsc = lsc, SM = SM,
+                };
+                var gsw = System.Diagnostics.Stopwatch.StartNew();
+                try { gpuImg = DrawGpu(tris, fr, out GpuDevice); GpuDevice += $" ({gsw.ElapsedMilliseconds} ms)"; } catch (Exception e) { GpuDevice = "failed: " + e.Message; gpuImg = null; }
+            }
+            if (opt.Hq && gpuImg == null)
+            {
+                double D(double[] a, double x, double y, double z) => a[0] * x + a[1] * y + a[2] * z;
+                sm = new float[SM * SM]; smh = new float[SM * SM];
+                for (int i = 0; i < sm.Length; i++) sm[i] = smh[i] = -1e9f;
+                var ss4 = new double[4];
+                foreach (var t in tris)
+                {
+                    double ax = (D(LX, t.X0, t.Y0, t.Z0) - lx0) * lsc + 2, ay = (D(LY, t.X0, t.Y0, t.Z0) - ly0) * lsc + 2;
+                    double bx = (D(LX, t.X1, t.Y1, t.Z1) - lx0) * lsc + 2, by = (D(LY, t.X1, t.Y1, t.Z1) - ly0) * lsc + 2;
+                    double qx = (D(LX, t.X2, t.Y2, t.Z2) - lx0) * lsc + 2, qy = (D(LY, t.X2, t.Y2, t.Z2) - ly0) * lsc + 2;
+                    double az = D(KEY, t.X0, t.Y0, t.Z0), bz = D(KEY, t.X1, t.Y1, t.Z1), qz = D(KEY, t.X2, t.Y2, t.Z2);
+                    double d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
+                    if (Math.Abs(d) < 1e-12) continue;
+                    int x0 = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, qx)))), x1 = Math.Min(SM - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, qx))));
+                    int y0 = Math.Max(0, (int)Math.Floor(Math.Min(ay, Math.Min(by, qy)))), y1 = Math.Min(SM - 1, (int)Math.Ceiling(Math.Max(ay, Math.Max(by, qy))));
+                    var M = t.M;
+                    var map = M.HairAlpha ? smh : sm;
+                    bool cut = M.Atos != null || (M.Color != null && (M.Color.Alpha || M.HairAlpha));
+                    for (int y = y0; y <= y1; y++)
+                        for (int x = x0; x <= x1; x++)
+                        {
+                            double px = x + .5, py = y + .5;
+                            double w0 = ((by - qy) * (px - qx) + (qx - bx) * (py - qy)) / d;
+                            double w1 = ((qy - ay) * (px - qx) + (ax - qx) * (py - qy)) / d, w2 = 1 - w0 - w1;
+                            if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                            double zz = w0 * az + w1 * bz + w2 * qz;
+                            int i = y * SM + x;
+                            if (zz <= map[i]) continue;
+                            if (cut)
+                            {
+                                double tu = w0 * t.U0 + w1 * t.U1 + w2 * t.U2, tv = w0 * t.V0 + w1 * t.V1 + w2 * t.V2;
+                                if (M.Atos != null) { Sample(M.Atos, tu, tv, ss4); if (ss4[0] < 128) continue; }
+                                if (M.Color != null && (M.Color.Alpha || M.HairAlpha)) { Sample(M.Color, tu, tv, ss4); if (ss4[3] < 128) continue; }
+                            }
+                            map[i] = (float)zz;
+                        }
+                }
+            }
+
+            // fraction of the key light reaching a point (7x7 PCF; hair shadows at about half strength)
+            double Lit(double x, double y, double z)
+            {
+                double sx = (LX[0] * x + LX[1] * y + LX[2] * z - lx0) * lsc + 2, sy = (LY[0] * x + LY[1] * y + LY[2] * z - ly0) * lsc + 2;
+                double sz = KEY[0] * x + KEY[1] * y + KEY[2] * z, bias = 0.012;
+                int cx0 = (int)sx, cy0 = (int)sy, lit = 0, hair = 0, n = 0;
+                for (int dy = -3; dy <= 3; dy++)
+                    for (int dx = -3; dx <= 3; dx++)
+                    {
+                        int xx = cx0 + dx * 2, yy = cy0 + dy * 2;
+                        n++;
+                        if (xx < 0 || yy < 0 || xx >= SM || yy >= SM) { lit++; continue; }
+                        if (sz + bias >= sm[yy * SM + xx]) lit++;
+                        if (sz + bias < smh[yy * SM + xx]) hair++;
+                    }
+                return lit / (double)n * (1 - 0.45 * hair / n);
+            }
+
+            var hs4 = new double[4];
+            // Hq shading: normal map in tangent space, GGX specular with the roughness map, metal from the color alpha,
+            // occlusion (ATOS blue), key-light shadow, wrapped red-tinted diffuse on skin, sky/ground ambient. Linear space.
+            void ShadeHq(Tri t, Mat M, double w0, double w1, double w2, double tu, double tv, double[] ng, bool flip,
+                double vx, double vy, double vz, double ao, double colA, double[] alb, float[] im, int pix)
+            {
+                double rough = 0.75;
+                double[] N = ng, Bv = null;
+                if (M.Nrm != null && t.T != null)
+                {
+                    Sample(M.Nrm, tu, tv, hs4);
+                    double mx = hs4[0] / 127.5 - 1, my = hs4[1] / 127.5 - 1, mz = Math.Sqrt(Math.Max(0, 1 - mx * mx - my * my));
+                    rough = Math.Max(0.08, hs4[3] / 255);
+                    var T = t.T;
+                    double tx = w0 * T[0] + w1 * T[3] + w2 * T[6], ty = w0 * T[1] + w1 * T[4] + w2 * T[7], tz = w0 * T[2] + w1 * T[5] + w2 * T[8];
+                    if (flip) { tx = -tx; ty = -ty; tz = -tz; }
+                    double dn = tx * ng[0] + ty * ng[1] + tz * ng[2]; // Gram-Schmidt
+                    var Tn = Norm(tx - ng[0] * dn, ty - ng[1] * dn, tz - ng[2] * dn);
+                    double sg = (w0 * t.Sg0 + w1 * t.Sg1 + w2 * t.Sg2) >= 0 ? 1 : -1;
+                    double bx = (ng[1] * Tn[2] - ng[2] * Tn[1]) * sg, by = (ng[2] * Tn[0] - ng[0] * Tn[2]) * sg, bz = (ng[0] * Tn[1] - ng[1] * Tn[0]) * sg;
+                    Bv = Norm(bx, by, bz);
+                    N = Norm(Tn[0] * mx + bx * my + ng[0] * mz, Tn[1] * mx + by * my + ng[1] * mz, Tn[2] * mx + bz * my + ng[2] * mz);
+                }
+                bool cutAlpha = M.Color != null && (M.Color.Alpha || M.HairAlpha);
+                double metal = cutAlpha || M.Color == null || M.Color.NoAlpha ? 0 : colA / 255; // color alpha = metalness (game: about 10/255 on skin and cloth)
+                double a2 = Math.Pow(rough * rough, 2);
+                double nv = Math.Max(1e-3, N[2]);
+                double shadow = Lit(vx, vy, vz);
+                if (M.Eye) shadow = 0.55 + 0.45 * shadow;
+                // skin shading: skin materials by name, elsewhere by the colour (skin painted on a "shirt" or "jacket" material
+                // must be lit like the face next to it, or the seam shows)
+                double skin = M.Skin ? 1 : M.HairAlpha || M.Eye || M.Color == null || M.Spec2 != null ? 0
+                    : SkinTone(Math.Pow(alb[0], 1 / 2.2), Math.Pow(alb[1], 1 / 2.2), Math.Pow(alb[2], 1 / 2.2));
+                var lin = new double[3];
+                void Light(double[] L, double[] lc, double inten, double sh, bool spec)
+                {
+                    double nl = N[0] * L[0] + N[1] * L[1] + N[2] * L[2];
+                    for (int k = 0; k < 3; k++)
+                    {
+                        double diff;
+                        double wr = k == 0 ? 0.5 : k == 1 ? 0.3 : 0.25;
+                        diff = Math.Max(0, nl) * (1 - skin) + Math.Max(0, (nl + wr) / (1 + wr)) * skin;
+                        lin[k] += alb[k] * (1 - metal) * diff * inten * lc[k] * sh;
+                    }
+                    if (!spec || nl <= 0) return;
+                    var H = Norm(L[0], L[1], L[2] + 1);
+                    if (M.Spec2 != null && Bv != null && M.Sharp1 > 0)
+                    {
+                        // hair: two strand highlights (Kajiya-Kay) along the strand direction, shifted along the normal
+                        double Strand(double shift, double sharp)
+                        {
+                            var Ts = Norm(Bv[0] + N[0] * shift, Bv[1] + N[1] * shift, Bv[2] + N[2] * shift);
+                            double th = Ts[0] * H[0] + Ts[1] * H[1] + Ts[2] * H[2];
+                            return Math.Pow(Math.Sqrt(Math.Max(0, 1 - th * th)), sharp);
+                        }
+                        double p1 = Strand(-M.Shift * 0.5, M.Sharp1), p2 = Strand(M.Shift * 0.5, Math.Max(1, M.Sharp2));
+                        double att = Math.Min(1, nl * 2);
+                        for (int k = 0; k < 3; k++)
+                            lin[k] += (M.Spec1[k] * p1 * 0.6 + M.Spec2[k] * alb[k] * p2 * 10) * M.SpecInt * att * inten * lc[k] * sh; // (the broad one takes the hair color)
+                        return;
+                    }
+                    double nh = Math.Max(0, N[0] * H[0] + N[1] * H[1] + N[2] * H[2]), vh = Math.Max(0, H[2]);
+                    double dd = nh * nh * (a2 - 1) + 1, Dg = a2 / (Math.PI * dd * dd);
+                    double kk = (rough + 1) * (rough + 1) / 8, G = nl / (nl * (1 - kk) + kk) * (nv / (nv * (1 - kk) + kk));
+                    double fw = Math.Pow(1 - vh, 5);
+                    for (int k = 0; k < 3; k++)
+                    {
+                        double f0 = 0.04 * (1 - metal) + alb[k] * metal, F = f0 + (1 - f0) * fw;
+                        lin[k] += Dg * G * F / (4 * nl * nv) * nl * inten * lc[k] * sh * Math.PI * (0.15 - 0.08 * skin);
+                    }
+                }
+                // studio look of the game's promotional renders: soft key from the front and a bit above, two white rim
+                // lights from behind on both sides (bright edges against the black), little fill: dark sides and folds
+                double[] white = { 1.0, 1.0, 1.0 };
+                if (opt.Dark)
+                {
+                    // "strong shadows": key from the right side, almost black shadows, fill and a rim light from the left
+                    Light(KEY, KEY_C, L_KEY * 0.9, 0.12 + 0.88 * shadow, true);
+                    Light(Norm(-FILL[0], FILL[1], FILL[2]), white, 0.15, 1, false);
+                    Light(Norm(-0.75, 0.35, -0.55), RIM_C, 0.5, 1, true);
+                }
+                else
+                {
+                    // the key is a spot from above: full on the face, fading down the body
+                    double hgt = Math.Max(0, Math.Min(1, (vy - mnY) / Math.Max(1e-6, mxY - mnY)));
+                    double spot = 0.15 + 0.85 * Math.Pow(hgt, 2.5);
+                    Light(KEY, KEY_C, L_KEY * 0.9 * spot, 0.2 + 0.8 * shadow, true);
+                    Light(FILL, white, 0.06, 1, false);
+                    Light(Norm(0.85, 0.2, -0.5), white, 1.3, 1, true);
+                    Light(Norm(-0.85, 0.2, -0.5), white, 1.3, 1, true);
+                    double edge = Math.Pow(1 - Math.Abs(ng[2]), 6) * 0.5 * ao; // thin fresnel edge right on the silhouette
+                    for (int k = 0; k < 3; k++) lin[k] += edge * (0.05 + alb[k]);
+                }
+                // sky (above) / ground (below) ambient and a dim reflection of it
+                double up = N[1] * 0.5 + 0.5;
+                double[] amb = { 0.04 + 0.05 * up, 0.045 + 0.055 * up, 0.055 + 0.07 * up };
+                double fe = Math.Pow(1 - nv, 5) * (1 - rough);
+                for (int k = 0; k < 3; k++)
+                {
+                    double f0 = 0.04 * (1 - metal) + alb[k] * metal;
+                    lin[k] += alb[k] * metal * (0.35 + 0.45 * up) * (1 - rough * 0.5) * ao; // metal reflects a light grey surround
+                    lin[k] += (alb[k] * (1 - metal) * amb[k] * 1.6 + (f0 + (1 - f0) * fe) * amb[k] * 0.8 * (1 - rough * 0.7)) * ao;
+                    lin[k] *= 0.4 + 0.6 * ao;
+                }
+                double lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+                for (int k = 0; k < 3; k++)
+                {
+                    double l = opt.Dark ? lin[k] : lum + (lin[k] - lum) * 0.92; // studio: slightly desaturated, like the reference renders
+                    im[pix * 4 + k] = (float)Math.Min(255, Math.Max(0, ToSrgb(l / (1 + l * 0.15))));
+                }
+                im[pix * 4 + 3] = 255;
+            }
+
+            var img = gpuImg ?? new float[IW * IH * 4];
+            var zb = gpuImg != null ? null : new float[IW * IH];
+            if (zb != null) for (int i = 0; i < zb.Length; i++) zb[i] = -1e9f;
             var s4 = new double[4];
             var lin = new double[3];
             var col = new double[3];
-            foreach (var t in tris)
+            foreach (var t in gpuImg != null ? new List<Tri>() : tris)
             {
-                double ax = PX(t.X0), ay = PY(t.Y0), bx = PX(t.X1), by = PY(t.Y1), qx = PX(t.X2), qy = PY(t.Y2);
+                if (cam != null && (t.Z0 > -0.01 || t.Z1 > -0.01 || t.Z2 > -0.01)) continue; // behind the camera
+                double ax = PX(t.X0, t.Z0), ay = PY(t.Y0, t.Z0), bx = PX(t.X1, t.Z1), by = PY(t.Y1, t.Z1), qx = PX(t.X2, t.Z2), qy = PY(t.Y2, t.Z2);
                 int x0 = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, qx)))), x1 = Math.Min(IW - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, qx))));
                 int y0 = Math.Max(0, (int)Math.Floor(Math.Min(ay, Math.Min(by, qy)))), y1 = Math.Min(IH - 1, (int)Math.Ceiling(Math.Max(ay, Math.Max(by, qy))));
                 double d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
@@ -432,18 +783,27 @@ namespace CustomOutfits
                         int i = y * IW + x;
                         if (z <= zb[i]) continue;
                         double tu = w0 * t.U0 + w1 * t.U1 + w2 * t.U2, tv = w0 * t.V0 + w1 * t.V1 + w2 * t.V2;
-                        if (M.Atos != null) { Sample(M.Atos, tu, tv, s4); if (s4[0] < 128) continue; }
+                        double ao = 1, colA = 255;
+                        if (M.Atos != null) { Sample(M.Atos, tu, tv, s4); if (s4[0] < 128) continue; ao = s4[2] / 255; }
                         if (M.Color != null)
                         {
                             Sample(M.Color, tu, tv, s4);
                             if ((M.Color.Alpha || M.HairAlpha) && s4[3] < 128) continue;
+                            colA = s4[3];
                             for (int k = 0; k < 3; k++) col[k] = M.Tint != null ? ToLin(s4[k]) * M.Tint[k] : ToLin(s4[k]);
                         }
                         else col[0] = col[1] = col[2] = ToLin(150);
                         zb[i] = (float)z;
                         // light (two-sided: the meshes are not closed)
                         var nn = Norm(w0 * n[0] + w1 * n[3] + w2 * n[6], w0 * n[1] + w1 * n[4] + w2 * n[7], w0 * n[2] + w1 * n[5] + w2 * n[8]);
-                        if (nn[2] < 0) { nn[0] = -nn[0]; nn[1] = -nn[1]; nn[2] = -nn[2]; }
+                        bool flip = nn[2] < 0;
+                        if (flip) { nn[0] = -nn[0]; nn[1] = -nn[1]; nn[2] = -nn[2]; }
+                        if (opt.Hq)
+                        {
+                            double vx = w0 * t.X0 + w1 * t.X1 + w2 * t.X2, vy = w0 * t.Y0 + w1 * t.Y1 + w2 * t.Y2;
+                            ShadeHq(t, M, w0, w1, w2, tu, tv, nn, flip, vx, vy, z, ao, colA, col, img, i);
+                            continue;
+                        }
                         double dk = nn[0] * KEY[0] + nn[1] * KEY[1] + nn[2] * KEY[2];
                         double key = Math.Max(0, (dk + 0.15) / 1.15);
                         double fil = Math.Max(0, nn[0] * FILL[0] + nn[1] * FILL[1] + nn[2] * FILL[2]);
@@ -479,6 +839,7 @@ namespace CustomOutfits
                     }
                 }
             if (opt.Re3) { FillHoles(outp, W, H, Math.Max(3, W / 72)); GlowAround(outp, W, H); }
+            else if (opt.Hq && !opt.Dark) GlowAround(outp, W, H); // soft light halo around the figure, like the promotional renders
             return outp;
         }
 

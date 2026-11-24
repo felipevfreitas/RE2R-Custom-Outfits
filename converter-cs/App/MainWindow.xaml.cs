@@ -217,6 +217,8 @@ namespace CustomOutfits
                 ? Visibility.Visible : Visibility.Collapsed;
         public string PictureText =>
             Plan.CustomPicture != null ? "Your image: " + Path.GetFileName(Plan.CustomPicture)
+            : Plan.PictureChoice == "pose" && Drawn != null ? "Drawn from the outfit."
+            : Plan.PictureChoice == "mod" ? (Plan.HasMenuPicture ? "The mod's own costume menu picture." : "The mod's image.")
             : Plan.HasMenuPicture ? "The mod's own costume menu picture."
             : MenuShot != null ? "The mod's image."
             : Drawn != null && Screenshot != null ? "The mod's image isn't made for the costume menu, so this picture was drawn from the outfit."
@@ -232,8 +234,10 @@ namespace CustomOutfits
             {
                 if (_previewDone) return _preview;
                 _previewDone = true;
-                if (Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile);
-                string f = Plan.CustomPicture ?? MenuShot ?? Drawn ?? Screenshot;
+                bool pose = Plan.CustomPicture == null && Plan.PictureChoice == "pose" && Drawn != null;
+                bool mod = Plan.CustomPicture == null && Plan.PictureChoice == "mod";
+                if (!pose && Plan.CustomPicture == null && Plan.HasMenuPicture) return _preview = TexImage(Plan.MenuPictureFile);
+                string f = pose ? Drawn : mod ? MenuShot ?? Screenshot : Plan.CustomPicture ?? MenuShot ?? Drawn ?? Screenshot;
                 if (f == null || !File.Exists(f)) return null;
                 try
                 {
@@ -268,7 +272,39 @@ namespace CustomOutfits
             catch { return null; }
         }
         public Visibility PreviewVisibility => PicturePreview != null ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility DefaultPictureVisibility => Plan.CustomPicture != null ? Visibility.Visible : Visibility.Collapsed;
+        // drawn pictures (RE2): the pose can be changed (the picture is drawn again)
+        private bool ShowsDrawn => Plan.CustomPicture == null && Drawn != null
+            && (Plan.PictureChoice == "pose" || Plan.PictureChoice == null && !Plan.HasMenuPicture && MenuShot == null);
+        public Visibility PoseVisibility => ShowsDrawn && Core.PoseCount(Plan) > 0 ? Visibility.Visible : Visibility.Collapsed;
+        /// <summary>The mod's own picture (its costume-menu .tex, else its image), for the "Change picture" choices; null if none.</summary>
+        public ImageSource ModPictureImage()
+        {
+            if (Plan.HasMenuPicture) return TexImage(Plan.MenuPictureFile);
+            return LoadImage(MenuShot ?? Screenshot);
+        }
+        public static ImageSource LoadImage(string f)
+        {
+            if (f == null || !File.Exists(f)) return null;
+            try
+            {
+                var b = new System.Windows.Media.Imaging.BitmapImage();
+                b.BeginInit();
+                b.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                b.CreateOptions = System.Windows.Media.Imaging.BitmapCreateOptions.IgnoreImageCache;
+                b.DecodePixelWidth = 336;
+                b.UriSource = new Uri(f);
+                b.EndInit();
+                b.Freeze();
+                return b;
+            }
+            catch { return null; }
+        }
+        /// <summary>Which choice is used now: "custom", "mod", "pose0", "pose1"...</summary>
+        public string CurrentPictureKey =>
+            Plan.CustomPicture != null ? "custom"
+            : Plan.PictureChoice == "pose" || Plan.PictureChoice == null && Drawn != null && !Plan.HasMenuPicture && MenuShot == null ? "pose" + Plan.Pose
+            : "mod";
+        public string PoseText => "Pose: " + OutfitRender.PoseNames[Math.Min(Plan.Pose, OutfitRender.PoseNames.Length - 1)];
         public string WarningsText => string.Join("\n", Plan.Warnings.Select(w => "• " + w));
     }
 
@@ -311,6 +347,9 @@ namespace CustomOutfits
                 if (!string.IsNullOrEmpty(input)) await OpenMods(input.Split('|'), false);
                 await Task.Delay(300);
                 if (Environment.GetEnvironmentVariable("CO_SNAPSHOT_END") != null) { PlanView.ScrollToEnd(); await Task.Delay(200); }
+                // (CO_SNAPSHOT_DIALOG=<png>: also an image of the "Change picture" choices)
+                if (Environment.GetEnvironmentVariable("CO_SNAPSHOT_DIALOG") != null && Mods.ItemsSource is System.Collections.IEnumerable vmsList)
+                    foreach (var o in vmsList) { if (o is ModVM first) { await ChangePicture(first); break; } }
                 var root = (FrameworkElement)Content;
                 var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bmp.Render(root);
@@ -549,20 +588,6 @@ namespace CustomOutfits
             }
         }
 
-        private void ChoosePicture_Click(object sender, RoutedEventArgs e)
-        {
-            if (!((sender as Button)?.Tag is ModVM vm)) return;
-            var dlg = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "Picture for the game's costume menu",
-                Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
-            };
-            if (dlg.ShowDialog(this) != true) return;
-            if (Tex.LoadRgba(dlg.FileName, 64, out _, out _) == null) { ShowToast("This image could not be read."); return; }
-            vm.Plan.CustomPicture = dlg.FileName;
-            RenderPlans();
-        }
-
         private void VariantPicture_Click(object sender, RoutedEventArgs e)
         {
             if (!((sender as Button)?.Tag is PickVM pv)) return;
@@ -581,9 +606,65 @@ namespace CustomOutfits
             if ((sender as Button)?.Tag is PickVM pv) pv.SetPicture(null);
         }
 
-        private void DefaultPicture_Click(object sender, RoutedEventArgs e)
+        // "Change picture": the mod's picture, each pose drawn from the outfit, or an image of the user's
+        private async void ChangePicture_Click(object sender, RoutedEventArgs e)
         {
-            if ((sender as Button)?.Tag is ModVM vm) { vm.Plan.CustomPicture = null; RenderPlans(); }
+            if ((sender as Button)?.Tag is ModVM vm) await ChangePicture(vm);
+        }
+
+        private async Task ChangePicture(ModVM vm)
+        {
+            var plan = vm.Plan;
+            int poses = Core.PoseCount(plan);
+            var drawn = new string[poses];
+            if (poses > 0)
+            {
+                SetBusy(true, poses > 1 ? "Drawing the poses..." : "Drawing the picture...");
+                try { await Task.Run(() => { for (int i = 0; i < poses; i++) drawn[i] = Core.PosePreview(plan, i); }); }
+                catch { }
+                SetBusy(false);
+            }
+            string cur = vm.CurrentPictureKey;
+            var items = new List<PictureChoiceItem>();
+            var modImg = vm.ModPictureImage();
+            if (modImg != null) items.Add(new PictureChoiceItem { Key = "mod", Title = "Mod's picture", Detail = "The one that comes with the mod", Image = modImg, Current = cur == "mod" });
+            for (int i = 0; i < poses; i++)
+                if (drawn[i] != null)
+                    items.Add(new PictureChoiceItem
+                    {
+                        Key = "pose" + i, Title = "Pose " + (i + 1),
+                        Detail = plan.Game == "re3" ? "Drawn from the outfit" : OutfitRender.PoseNames[Math.Min(i, OutfitRender.PoseNames.Length - 1)],
+                        Image = ModVM.LoadImage(drawn[i]), Current = cur == "pose" + i,
+                    });
+            items.Add(new PictureChoiceItem
+            {
+                Key = "custom", Title = "Upload image",
+                Detail = plan.CustomPicture != null ? Path.GetFileName(plan.CustomPicture) : "A picture of your own",
+                Image = plan.CustomPicture != null ? ModVM.LoadImage(plan.CustomPicture) : null, Current = cur == "custom",
+            });
+            string pick = PictureDialog.Show(this, "Change picture", items);
+            if (pick == null) return;
+            if (pick == "custom")
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "Picture for the game's costume menu",
+                    Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
+                };
+                if (dlg.ShowDialog(this) != true) return;
+                if (Tex.LoadRgba(dlg.FileName, 64, out _, out _) == null) { ShowToast("This image could not be read."); return; }
+                plan.CustomPicture = dlg.FileName;
+            }
+            else if (pick == "mod") { plan.CustomPicture = null; plan.PictureChoice = "mod"; }
+            else
+            {
+                int n = int.Parse(pick.Substring(4));
+                SetBusy(true, "Drawing the picture...");
+                try { await Task.Run(() => Core.Redraw(plan, n)); plan.CustomPicture = null; plan.PictureChoice = "pose"; }
+                catch (Exception ex) { ShowToast("Could not draw the picture: " + ex.Message); }
+                SetBusy(false);
+            }
+            RenderPlans();
         }
 
         private void StartOver_Click(object sender, RoutedEventArgs e)

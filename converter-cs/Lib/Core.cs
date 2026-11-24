@@ -53,6 +53,9 @@ namespace CustomOutfits
         public bool HasMenuPicture;    // the mod brings its own costume-menu picture (ui0601_*_iam.tex)
         public string MenuPictureFile; // one of them (preview in the window)
         public string DrawDir;         // temporary folder of the drawn pictures
+        public int Pose;               // pose of the drawn pictures (OutfitRender.PoseNames)
+        public string PictureChoice;   // the user's choice in the window: null = automatic, "mod" = the mod's image, "pose" = drawn (Pose); CustomPicture = an image of theirs
+        public List<KeyValuePair<PlanOption, ConvertReport>> DrawReports; // what the pictures are drawn from (drawn again with another pose)
         public List<PlanOption> Options = new List<PlanOption>();
         public List<string> Warnings = new List<string>();
     }
@@ -372,6 +375,7 @@ namespace CustomOutfits
             plan.MenuPictureFile = roots.SelectMany(r => Directory.EnumerateFiles(r, "ui0601_*_iam.tex.*", SearchOption.AllDirectories))
                 .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
             plan.HasMenuPicture = plan.MenuPictureFile != null;
+            if (game == "re2" || game == "re3") plan.DrawReports = reports; // (pictures can be drawn later on request, see Redraw)
             // no image at all in the mod: the picture of each body is drawn from the outfit itself
             // (also when its image is not made for the menu, see FitsMenu)
             if ((game == "re2" || game == "re3") && !plan.HasMenuPicture && plan.Options.All(o => !FitsMenu(o.Screenshot)))
@@ -436,15 +440,60 @@ namespace CustomOutfits
 
         /// <summary>Draws every body of the mod (characters with a thumbnail pose) with the face and hair it is worn
         /// with in game: the same mod's (same option first), else the game's for the costume it is shown in.</summary>
+        /// <summary>Draws the pictures of a mod in a pose (0 = the first) and makes them the ones used (window: "Change picture").
+        /// Pictures already drawn in that pose are reused.</summary>
+        public static void Redraw(Plan plan, int pose)
+        {
+            if (plan.DrawReports == null) return;
+            plan.Pose = Math.Max(0, pose);
+            if (plan.Game == "re3") DrawPicturesRe3(plan, plan.DrawReports); else DrawPictures(plan, plan.DrawReports);
+        }
+
+        /// <summary>The picture of the mod in a pose (for the choice in the window), without changing the one used; null if it
+        /// can't be drawn.</summary>
+        public static string PosePreview(Plan plan, int pose)
+        {
+            if (plan.DrawReports == null) return null;
+            var all = plan.Options.SelectMany(o => o.Outfits).ToList();
+            var keep = all.Select(o => o.Drawn).ToList();
+            int keepPose = plan.Pose;
+            try
+            {
+                foreach (var o in all) o.Drawn = null;
+                Redraw(plan, pose);
+                return (MainOption(plan)?.Outfits ?? new List<PlanOutfit>()).Concat(all).Select(o => o.Drawn).FirstOrDefault(d => d != null && File.Exists(d));
+            }
+            finally
+            {
+                for (int i = 0; i < all.Count; i++) all[i].Drawn = keep[i];
+                plan.Pose = keepPose;
+            }
+        }
+
+        /// <summary>How many poses the pictures of this mod can be drawn in (0 = none: no body of a posed character).</summary>
+        public static int PoseCount(Plan plan)
+        {
+            if (plan.DrawReports == null) return 0;
+            var counts = plan.DrawReports.SelectMany(r => r.Value.Outfits).Where(o => o.Part == "body" && o.Variants != null)
+                .Select(o => plan.Game == "re3" ? (OutfitRender.HasPose(o.Character) ? 1 : 0) : OutfitRender.PoseCount(o.Character)).Where(n => n > 0).ToList();
+            return counts.Count == 0 ? 0 : counts.Min();
+        }
+
         private static void DrawPictures(Plan plan, List<KeyValuePair<PlanOption, ConvertReport>> reports)
         {
             var paks = Converter.Paks(plan.GameDir);
             foreach (var kv in reports)
                 foreach (var body in kv.Value.Outfits.Where(o => o.Part == "body" && o.Variants != null))
                 {
-                    var pose = OutfitRender.Pose(body.Character);
+                    string poseKey = OutfitRender.PoseKey(body.Character, plan.Pose) ?? body.Character;
+                    var pose = OutfitRender.Pose(poseKey);
                     var po = kv.Key.Outfits.FirstOrDefault(x => x.Character == body.Character && x.Part == "body");
                     if (pose == null || po == null) continue;
+                    if (plan.DrawDir != null)
+                    {
+                        string done = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_pose" + plan.Pose + ".png");
+                        if (File.Exists(done)) { po.Drawn = done; continue; } // drawn before in this pose
+                    }
                     try
                     {
                         var bv = body.Variants[body.Default];
@@ -469,10 +518,19 @@ namespace CustomOutfits
                                 rp = DrawPart(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
                             if (rp != null) parts.Add(rp);
                         }
-                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024);
+                        // Hq on the graphics card (CPU if there is none), strong shadows with the key light from the right,
+                        // the character's camera from Blender; a figure it cuts off (other proportions) gets automatic framing
+                        var opt = new RenderOptions { Hq = true, Gpu = true, Dark = true };
+                        if (OutfitRender.Camera(poseKey, out var cam, out var fovY)) { opt.Camera = cam; opt.FovX = fovY; }
+                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+                        if (opt.Camera != null && OutfitRender.TouchesBorder(rgba, 1024, 1024))
+                        {
+                            opt.Camera = null;
+                            rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+                        }
                         if (rgba == null) continue;
                         if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
-                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + ".png");
+                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_pose" + plan.Pose + ".png");
                         OutfitRender.SavePng(rgba, 1024, 1024, file);
                         po.Drawn = file;
                     }
@@ -651,8 +709,9 @@ namespace CustomOutfits
                             foreach (var pv in o.Pickable) if (pv.Picture != null) pictures[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Picture;
                         }
                     }
-                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? MenuShot(plan, opt), ThumbnailForced = plan.CustomPicture != null,
-                        Drawn = opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? (plan.PictureChoice == "pose" ? null : plan.PictureChoice == "mod" ? ModPicture(plan, opt) : MenuShot(plan, opt)),
+                        ThumbnailForced = plan.CustomPicture != null || plan.PictureChoice == "pose",
+                        Drawn = plan.CustomPicture == null && plan.PictureChoice == "mod" ? null : opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
                     foreach (var w in rep.Warnings) result.Warnings.Add(opt.Name + ": " + w);
                     foreach (var d in rep.DlcSwaps) dlcSwaps.Add((opt.Name, d.Part, d.Label, d.Textures));
@@ -744,6 +803,9 @@ namespace CustomOutfits
             bool drawn = plan.Options.Any(o => o.Outfits.Any(x => x.Drawn != null && File.Exists(x.Drawn)));
             return drawn ? null : opt.Screenshot ?? main;
         }
+
+        /// <summary>The mod's own image for an option (when the user picks it, even if it isn't made for the menu).</summary>
+        public static string ModPicture(Plan plan, PlanOption opt) => MenuShot(plan, opt) ?? opt.Screenshot ?? MainOption(plan)?.Screenshot;
 
         /// <summary>Option that represents the mod: main (no addonfor) with body and screenshot, then
         /// main with screenshot, then any with body and screenshot, then the first.</summary>
