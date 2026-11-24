@@ -209,7 +209,7 @@ namespace CustomOutfits
             public string Name;
             public Tex Color, Atos, Nrm; // Nrm: NormalRoughnessMap (R,G normal; A roughness), only in Hq
             public double[] Tint;
-            public bool HairAlpha, Cull, Skin, Eye; // Eye: eyeball (the key light shadow of the lids is softened, as the game eye shader does)
+            public bool HairAlpha, Cull, Skin, Eye, Face; // Face: face material (GPU: its painted scalp is darkened) // Eye: eyeball (the key light shadow of the lids is softened, as the game eye shader does)
             public double[] Spec1, Spec2; // hair shader (Hq): primary / secondary strand highlight colors
             public double Sharp1, Sharp2, SpecInt, Shift; // Skin: soft light through the skin (Hq)
         }
@@ -416,6 +416,7 @@ namespace CustomOutfits
                     matOf[i] = new Mat
                     {
                         Name = name,
+                        Face = Regex.IsMatch(name, "face", RegexOptions.IgnoreCase),
                         Color = Texture(ct.Path),
                         Atos = at != null ? Texture(at.Path) : null,
                         Nrm = nt != null ? Texture(nt.Path) : null,

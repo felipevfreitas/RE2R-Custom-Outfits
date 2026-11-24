@@ -54,7 +54,8 @@ cbuffer Material : register(b1)
     float4 tint;    // rgb, has tint
     float4 spec1;   // rgb, sharpness
     float4 spec2;   // rgb, sharpness
-    float4 hairP;   // intensity, shift, eyeball
+    float4 hairP;   // intensity, shift, eyeball, hair coverage scale
+    float4 extra;   // face material (its painted scalp: darker, like hair roots), scalp darkening, -, -
 };
 Texture2D texColor : register(t0);
 Texture2D texAtos : register(t1);
@@ -117,7 +118,7 @@ SOut VSShadow(VIn v)
 float PSShadow(SOut i) : SV_Target
 {
     if (flags.y > 0.5 && texAtos.Sample(samp, i.uv).r * 255 < 128) discard;
-    if (flags.x > 0.5 && flags.w > 0.5 && texColor.Sample(samp, i.uv).a * 255 < 128) discard;
+    if (flags.x > 0.5 && flags.w > 0.5 && texColor.Sample(samp, i.uv).a * 255 < (q.x > 0.5 ? 40 : 128)) discard; // (quality: thin strands shadow too)
     return i.lz;
 }
 
@@ -163,11 +164,31 @@ float LitSoft(float3 p, float2 pix)
         lit += smSolid.SampleCmpLevelZero(cmpLit, uv + d, ref) + smSolid.SampleCmpLevelZero(cmpLit, uv + d2, ref);
         hair += smHair.SampleCmpLevelZero(cmpHair, uv + d, ref) + smHair.SampleCmpLevelZero(cmpHair, uv + d2, ref);
     }
-    return lit / 32 * (1 - 0.45 * hair / 32);
+    return lit / 32 * (1 - 0.6 * hair / 32);
 }
 
 static float3 gN, gBv, gAlb, gLin;
 static float gMetal, gRough, gNv, gA2, gSkin;
+// hair painted on the scalp of a face texture: darker than skin, yellower (less blue), more green than skin
+float ScalpTone(float3 c)
+{
+    if (c.r < 1e-3) return 0;
+    float gr = c.g / c.r, br = c.b / c.r;
+    return smoothstep(0.78, 0.84, gr) * (1 - smoothstep(0.70, 0.76, br)) * (1 - smoothstep(0.55, 0.70, c.r));
+}
+// quality: share of hair in front of this point nearby on screen (the scalp seen between strands; not dirt on a forehead)
+float HairNear(float2 pix, float z)
+{
+    float2 ap = pix / q.z;
+    float n = 0;
+    [unroll] for (int k = 0; k < 12; k++)
+    {
+        float a = k * 0.5235988, r = 3 + (k % 3) * 3;
+        float4 P = gPos.Load(int3(int2(ap + float2(cos(a), sin(a)) * r), 0));
+        if (P.w > 1.5 && P.z > z) n++;
+    }
+    return saturate(n / 12 * 2.5);
+}
 float SkinTone(float3 c)
 {
     if (c.r < 1e-3) return 0;
@@ -205,7 +226,7 @@ void Light(float3 L, float3 lc, float inten, float sh, bool spec)
 float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) : SV_Target
 {
     if (flags2.z > 0.5 && !front) discard;
-    float ao = 1, colA = 255, cutA = 1;
+    float ao = 1, colA = 255, cutA = 1, hairA = 1;
     bool hasCut = false, quality = q.x > 0.5;
     cov = 0xffffffff;
     if (flags.y > 0.5) { float4 a = texAtos.Sample(samp, i.uv); if (quality) { cutA = a.r; hasCut = true; } else if (a.r * 255 < 128) discard; ao = a.b; }
@@ -213,10 +234,12 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) :
     if (flags.x > 0.5)
     {
         float4 c = texColor.Sample(samp, i.uv);
-        if (flags.w > 0.5) { if (quality) { cutA = min(cutA, c.a); hasCut = true; } else if (c.a * 255 < 128) discard; }
+        if (flags.w > 0.5) { if (quality) { hairA = c.a; hasCut = true; } else if (c.a * 255 < 128) discard; }
         colA = c.a * 255;
         col = float3(ToLin(c.r), ToLin(c.g), ToLin(c.b));
         if (tint.w > 0.5) col *= tint.rgb;
+        // face: the scalp painted under the hair (not skin coloured) reads as skin in a still picture; darken it like roots
+        if (extra.x > 0.5 && quality) col *= lerp(1, extra.y, ScalpTone(c.rgb) * HairNear(i.pos.xy, i.vp.z));
     }
     else col = ToLin(150.0 / 255).xxx;
     if (hasCut)
@@ -224,8 +247,11 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) :
         // quality: the cut-out edge covers part of the pixel's samples (anti-aliased strands instead of a hard cut);
         // the mask is rotated per pixel and per depth so stacked hair layers cover different samples
         uint S = (uint)q.y;
-        float e = saturate((cutA - 0.5) / max(fwidth(cutA), 1e-3) + 0.5);
-        uint n = (uint)round(e * S);
+        // cut-out maps (ATOS): a sharp, anti-aliased edge; hair alpha: partial coverage as in the game (thin and see-through
+        // strand tips stay visible instead of vanishing below 50%), dithered between sample counts
+        float e = saturate((cutA - 0.5) / max(fwidth(cutA), 1e-3) + 0.5) * saturate(hairA * hairP.w);
+        float noise = Ign(i.pos.yx * 1.7 + frac(i.vp.z * 53.0) * 37);
+        uint n = flags.w > 0.5 ? (uint)min(S, floor(e * S + noise)) : (uint)round(e * S);
         if (n == 0) discard;
         uint full = S >= 32 ? 0xffffffff : ((1u << S) - 1), m = n >= S ? full : ((1u << n) - 1);
         uint rot = (uint)(Ign(i.pos.xy + frac(i.vp.z * 37.0) * 64) * S) % S;
@@ -299,10 +325,10 @@ GOut PSGeo(VOut i, bool front : SV_IsFrontFace)
 {
     if (flags2.z > 0.5 && !front) discard;
     if (flags.y > 0.5 && texAtos.Sample(samp, i.uv).r * 255 < 128) discard;
-    if (flags.x > 0.5 && flags.w > 0.5 && texColor.Sample(samp, i.uv).a * 255 < 128) discard;
+    if (flags.x > 0.5 && flags.w > 0.5 && texColor.Sample(samp, i.uv).a * 255 < 40) discard; // (thin strands count for the contact shadow)
     float3 n = normalize(i.nrm);
     if (n.z < 0) n = -n;
-    GOut o; o.pos = float4(i.vp, 1); o.nrm = float4(n, 0);
+    GOut o; o.pos = float4(i.vp, flags.w > 0.5 ? 2 : 1); o.nrm = float4(n, 0); // (w = 2: hair)
     return o;
 }
 struct FOut { float4 pos : SV_Position; };
@@ -542,7 +568,7 @@ float PSBlur(FOut i) : SV_Target
 
                     D3D11Buffer Cb(int floats) => Keep(new D3D11Buffer(dev, floats * 4, ResourceUsage.Default, BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0));
                     var cbFrame = Cb(48);
-                    var cbMat = Cb(24);
+                    var cbMat = Cb(28);
                     float F(double x) => (float)x;
                     bool persp = f.Persp;
                     double zA = persp ? 0.01 : zMax, zB = persp ? 1 / Math.Max(1e-3, -zMin + 1 - 0.01) : 1 / Math.Max(1e-6, zMax - zMin + 1e-3);
@@ -574,7 +600,8 @@ float PSBlur(FOut i) : SV_Target
                             F(m.Tint?[0] ?? 1), F(m.Tint?[1] ?? 1), F(m.Tint?[2] ?? 1), m.Tint != null ? 1f : 0,
                             F(s1[0]), F(s1[1]), F(s1[2]), F(m.Sharp1),
                             F(s2[0]), F(s2[1]), F(s2[2]), F(m.Sharp2),
-                            F(m.SpecInt), F(m.Shift), m.Eye ? 1f : 0, 0,
+                            F(m.SpecInt), F(m.Shift), m.Eye ? 1f : 0, 2f, // hair coverage: alpha x2 (fuller hair, chosen on renders of the Grace mod)
+                            m.Face ? 1f : 0, 0.35f, 0, 0, // face: painted scalp between strands at 35% brightness
                         }, cbMat);
                         ctx.PixelShader.SetShaderResources(0, Srv(m.Color), Srv(m.Atos), Srv(m.Nrm));
                     }
@@ -640,7 +667,7 @@ float PSBlur(FOut i) : SV_Target
                     var srvHair = Keep(new ShaderResourceView(dev, smHair.Tex));
 
                     // quality: contact shadows (screen-space ambient occlusion at half size, then a depth-aware blur)
-                    ShaderResourceView srvAo = null;
+                    ShaderResourceView srvAo = null, srvGpos = null;
                     if (quality)
                     {
                         var gp = Target(aoW, aoH, Format.R32G32B32A32_Float, true);
@@ -655,6 +682,7 @@ float PSBlur(FOut i) : SV_Target
                         foreach (var r in ranges) { SetMaterial(r.M); ctx.Draw(r.Count, r.Start); }
                         ctx.OutputMerger.SetTargets((DepthStencilView)null, (RenderTargetView)null);
                         var srvGp = Keep(new ShaderResourceView(dev, gp.Tex));
+                        srvGpos = srvGp;
                         var srvGn = Keep(new ShaderResourceView(dev, gn.Tex));
                         var aoRaw = Target(aoW, aoH, Format.R16_Float, true);
                         var aoBlur = Target(aoW, aoH, Format.R16_Float, true);
@@ -684,7 +712,7 @@ float PSBlur(FOut i) : SV_Target
                     ctx.OutputMerger.SetTargets(main.Dsv, main.Rtv);
                     ctx.ClearRenderTargetView(main.Rtv, new RawColor4(0, 0, 0, 0));
                     ctx.ClearDepthStencilView(main.Dsv, DepthStencilClearFlags.Depth, 1f, 0);
-                    ctx.PixelShader.SetShaderResources(3, srvSolid, srvHair, srvAo);
+                    ctx.PixelShader.SetShaderResources(3, srvSolid, srvHair, srvAo, srvGpos);
                     foreach (var r in ranges) { SetMaterial(r.M); ctx.Draw(r.Count, r.Start); }
 
                     // read back
