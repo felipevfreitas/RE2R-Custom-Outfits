@@ -84,7 +84,8 @@ namespace CustomOutfits
         {
             // DLC costumes of the game menu (Claire: a Noir, b Military, c Elza Walker, as in the game's costume list; d is not confirmed)
             ["pl1000"] = new Dictionary<int, string> { [10] = "Noir", [11] = "Military", [12] = "Elza Walker", [13] = "'98" },
-            ["pl0000"] = new Dictionary<int, string> { [13] = "Noir" },
+            // Leon (checked against the DLC paks, 2026-11-25): a Noir (pl0004), b Arklay Sheriff (pl0005), d '98 (pl0007 + face pl0057)
+            ["pl0000"] = new Dictionary<int, string> { [10] = "Noir", [11] = "Arklay Sheriff", [13] = "'98" },
             ["pl4100"] = new Dictionary<int, string> { [0] = "Tofu", [1] = "Uiro", [2] = "Annin Tofu", [3] = "Konnyaku", [4] = "Flan" },
         };
 

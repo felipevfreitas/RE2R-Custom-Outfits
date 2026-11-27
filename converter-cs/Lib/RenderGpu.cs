@@ -56,6 +56,7 @@ cbuffer Material : register(b1)
     float4 spec2;   // rgb, sharpness
     float4 hairP;   // intensity, shift, eyeball, hair coverage scale
     float4 extra;   // face material (its painted scalp: darker, like hair roots), scalp darkening, -, -
+    float4 emis;    // glowing material: light colour (brightest channel = 1), has glow
 };
 Texture2D texColor : register(t0);
 Texture2D texAtos : register(t1);
@@ -223,9 +224,17 @@ void Light(float3 L, float3 lc, float inten, float sh, bool spec)
     gLin += Dg * G * F / (4 * nl * gNv) * nl * inten * lc * sh * 3.14159265 * (0.15 - 0.08 * gSkin);
 }
 
+// RE3 face skin is drawn from the front only (a turned head folds the throat): its front is decided by the surface normal against the
+// direction to the camera, not by the triangle winding, which differs between the game's face and mods' faces
+bool BackFacing(VOut i)
+{
+    float3 toCam = screen.z > 0.5 ? -i.vp : float3(0, 0, 1);
+    return dot(normalize(i.nrm), normalize(toCam)) < -0.15;
+}
+
 float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) : SV_Target
 {
-    if (flags2.z > 0.5 && !front) discard;
+    if (flags2.z > 0.5 && BackFacing(i)) discard;
     float ao = 1, colA = 255, cutA = 1, hairA = 1;
     bool hasCut = false, quality = q.x > 0.5;
     cov = 0xffffffff;
@@ -241,7 +250,7 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) :
         // face: the scalp painted under the hair (not skin coloured) reads as skin in a still picture; darken it like roots
         if (extra.x > 0.5 && quality) col *= lerp(1, extra.y, ScalpTone(c.rgb) * HairNear(i.pos.xy, i.vp.z));
     }
-    else col = ToLin(150.0 / 255).xxx;
+    else col = tint.w > 0.5 ? saturate(tint.rgb) : ToLin(150.0 / 255).xxx; // (a plain colour: lamps)
     if (hasCut)
     {
         // quality: the cut-out edge covers part of the pixel's samples (anti-aliased strands instead of a hard cut);
@@ -313,6 +322,7 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) :
     gLin *= 0.4 + 0.6 * ao;
     if (aoP.w > 0.5) return float4(ToSrgb(ssao).xxx, 255) * q.w;
     if (quality) gLin *= 0.3 + 0.7 * ssao; // contact shadow: creases, where parts touch, under the hair
+    if (emis.w > 0.5) gLin = emis.rgb * 1.6 + gLin * 0.03; // a lit lamp shows its own colour
     float lum = dot(gLin, float3(0.2126, 0.7152, 0.0722));
     float3 l = ortho.w > 0.5 ? gLin : lum + (gLin - lum) * 0.92;
     l = l / (1 + l * 0.15);
@@ -323,7 +333,7 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace, out uint cov : SV_Coverage) :
 struct GOut { float4 pos : SV_Target0; float4 nrm : SV_Target1; };
 GOut PSGeo(VOut i, bool front : SV_IsFrontFace)
 {
-    if (flags2.z > 0.5 && !front) discard;
+    if (flags2.z > 0.5 && BackFacing(i)) discard;
     if (flags.y > 0.5 && texAtos.Sample(samp, i.uv).r * 255 < 128) discard;
     if (flags.x > 0.5 && flags.w > 0.5 && texColor.Sample(samp, i.uv).a * 255 < 40) discard; // (thin strands count for the contact shadow)
     float3 n = normalize(i.nrm);
@@ -568,7 +578,7 @@ float PSBlur(FOut i) : SV_Target
 
                     D3D11Buffer Cb(int floats) => Keep(new D3D11Buffer(dev, floats * 4, ResourceUsage.Default, BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0));
                     var cbFrame = Cb(48);
-                    var cbMat = Cb(28);
+                    var cbMat = Cb(32);
                     float F(double x) => (float)x;
                     bool persp = f.Persp;
                     double zA = persp ? 0.01 : zMax, zB = persp ? 1 / Math.Max(1e-3, -zMin + 1 - 0.01) : 1 / Math.Max(1e-6, zMax - zMin + 1e-3);
@@ -602,6 +612,7 @@ float PSBlur(FOut i) : SV_Target
                             F(s2[0]), F(s2[1]), F(s2[2]), F(m.Sharp2),
                             F(m.SpecInt), F(m.Shift), m.Eye ? 1f : 0, 2f, // hair coverage: alpha x2 (fuller hair, chosen on renders of the Grace mod)
                             m.Face ? 1f : 0, 0.35f, 0, 0, // face: painted scalp between strands at 35% brightness
+                            F(m.Emis?[0] ?? 0), F(m.Emis?[1] ?? 0), F(m.Emis?[2] ?? 0), m.Emis != null ? 1f : 0,
                         }, cbMat);
                         ctx.PixelShader.SetShaderResources(0, Srv(m.Color), Srv(m.Atos), Srv(m.Nrm));
                     }

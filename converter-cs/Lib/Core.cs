@@ -23,11 +23,17 @@ namespace CustomOutfits
         public string Key;
         public string Slot;    // the game costume it replaces (fixed text)
         public string Name;    // name typed by the user; empty = "<body name> - <Slot>"
+        public bool PictureDrawn; // Picture is a pose drawn from this outfit (transparent PNG, shown whole) rather than an image of the user's
+        public List<int> Costumes = new List<int>(); // the game costumes it replaces directly
+        public string Root;    // the mod folder (option) it comes from
+        public bool Disabled;  // switched off in the window: left out of the package (its costumes: the other versions, else the game)
+        public string Drawn;   // automatic picture drawn from this outfit (plan's pose), when the mod has no costume-menu picture for it
     }
 
     public sealed class PlanOutfit
     {
         public List<PlanVariant> Pickable = new List<PlanVariant>(); // the variants a game costume points to (body: what the Specific Outfit submenu lists; face/hair: the options of the entry)
+        public bool Disabled;    // switched off in the window: left out of the package
         public bool EachEntry;   // body: one entry per outfit in the game's costume menu (else one that follows the campaign)
         public string Character, CharacterName, Part, PartName, Name;
         public List<string> Variants = new List<string>();
@@ -35,8 +41,16 @@ namespace CustomOutfits
         public string Drawn; // body: picture drawn from the outfit (PNG), used when the mod has no image
     }
 
+    /// <summary>An add-on the user gave a mod in the window (a separate archive: the colours of a skin...).</summary>
+    public sealed class PlanAddon
+    {
+        public string Input, Name, Error; // Error: could not be read (nothing for this game, broken archive)
+        public List<string> Roots;        // its mod folders, joined to the mod's as add-on options
+    }
+
     public sealed class PlanOption
     {
+        public string AddonInput; // it comes from this add-on (window), else from the mod itself
         public string Root, Name, Slug, Author, Version, Screenshot;
         public bool IsAddon; // modinfo.ini with "addonfor=": add-on (face/hair) of another option of the mod
         public string BaseRoot, BaseSlug; // the option it is an add-on for (its files the add-on does not bring come from there)
@@ -49,7 +63,11 @@ namespace CustomOutfits
         public string Input, Extracted, Game = "re2", GameDir, BaseName, PackageName;
         public Dictionary<string, string> GroupNames = new Dictionary<string, string>(); // "character|part" -> name in the Wardrobe menu of the outfits of that part (a package with several: the colours of a hair mod)
         public bool IsArchive;
-        public string CustomPicture;   // image the user chose for the game costume menu (wins over the mod's)
+        public bool PicturesDrawn;     // DrawMissingPictures already ran (drawn, or not drawable)
+        public List<PlanAddon> Addons = new List<PlanAddon>(); // add-ons the user gave this mod in the window (separate archives)
+        public List<string> AddonDirs = new List<string>();    // where they were extracted (deleted with the plan)
+        public string ModBuild;        // game version the mod's files are for: "rt", "nonrt", "both" or null (no versioned files)
+        public string CustomPicture;  // image the user chose for the game costume menu (wins over the mod's)
         public bool HasMenuPicture;    // the mod brings its own costume-menu picture (ui0601_*_iam.tex)
         public string MenuPictureFile; // one of them (preview in the window)
         public string DrawDir;         // temporary folder of the drawn pictures
@@ -90,7 +108,11 @@ namespace CustomOutfits
 
         // ------------------------------------------------------------------ game folder
         // games: "re2" (Resident Evil 2 Remake) and "re3" (Resident Evil 3 Remake)
-        public static readonly Dictionary<string, string> GameNames = new Dictionary<string, string> { ["re2"] = "Resident Evil 2", ["re3"] = "Resident Evil 3" };
+        // (re4 / re9: shown on the game picker, not supported yet)
+        public static readonly Dictionary<string, string> GameNames = new Dictionary<string, string>
+        {
+            ["re2"] = "Resident Evil 2", ["re3"] = "Resident Evil 3", ["re4"] = "Resident Evil 4", ["re9"] = "Resident Evil Requiem",
+        };
         private static readonly Dictionary<string, string> GameFolders = new Dictionary<string, string>
         {
             ["re2"] = "RESIDENT EVIL 2  BIOHAZARD RE2", ["re3"] = "RE3",
@@ -99,8 +121,30 @@ namespace CustomOutfits
         public static bool IsGameDir(string d, string game = "re2") =>
             !string.IsNullOrEmpty(d) && File.Exists(Path.Combine(d, game + ".exe")) && File.Exists(Path.Combine(d, "re_chunk_000.pak"));
 
-        /// <summary>Which game a mod is for: RE3 keeps its characters under natives/*/escape/.</summary>
-        public static string GameOfMod(string modRoot) => Re3.IsRe3Mod(modRoot) ? "re3" : "re2";
+        /// <summary>Which game a mod is for: RE3 keeps its characters under natives/*/escape/, RE4 everything under
+        /// natives/stm/_chainsaw/; anything else is taken as RE2.</summary>
+        public static string GameOfMod(string modRoot)
+        {
+            if (Re3.IsRe3Mod(modRoot)) return "re3";
+            if (Directory.Exists(Path.Combine(modRoot, "natives", "stm", "_chainsaw"))) return "re4";
+            return "re2";
+        }
+
+        /// <summary>Whether a mod folder has files for this game (one folder can hold files for two games).</summary>
+        public static bool ModHasGame(string modRoot, string game)
+        {
+            switch (game)
+            {
+                case "re3": return Re3.IsRe3Mod(modRoot);
+                case "re4": return Directory.Exists(Path.Combine(modRoot, "natives", "stm", "_chainsaw"));
+                case "re2":
+                    // RE2 keeps its characters in sectionroot/character/player/ (costume prefabs in objectroot/prefab/character/),
+                    // under natives/x64 or natives/stm (RE3 has some sectionroot/ files too, but not its characters)
+                    return new[] { "x64", "stm" }.Any(pl => Directory.Exists(Path.Combine(modRoot, "natives", pl, "sectionroot", "character", "player"))
+                        || Directory.Exists(Path.Combine(modRoot, "natives", pl, "objectroot", "prefab", "character")));
+                default: return GameOfMod(modRoot) == game;
+            }
+        }
 
         /// <summary>Default Steam path or any Steam library (libraryfolders.vdf).</summary>
         public static string DetectGameDir(string game = "re2")
@@ -154,6 +198,29 @@ namespace CustomOutfits
         private static void Extract(string file, string dest)
         {
             string root = Path.GetFullPath(dest).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            // .zip: Windows' own decompressor (native zlib) is ~5x faster than SharpCompress (527 MB pack: 1.8 s vs 9.7 s);
+            // a zip it can't read (Deflate64, odd headers) goes to SharpCompress below
+            if (file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    using (var zip = System.IO.Compression.ZipFile.OpenRead(file))
+                        foreach (var e in zip.Entries)
+                        {
+                            if (!Needed(e.FullName)) continue;
+                            string target = SafeTarget(root, e.FullName, e.FullName.EndsWith("/") || e.FullName.EndsWith("\\"));
+                            if (target == null) continue;
+                            using (var src = e.Open())
+                            using (var fs = File.Create(target)) src.CopyTo(fs);
+                        }
+                    return;
+                }
+                catch (Exception ex) when (ex is NotSupportedException || ex is InvalidDataException)
+                {
+                    foreach (var d in Directory.GetDirectories(dest)) TryDelete(d); // start again with SharpCompress
+                    foreach (var f in Directory.GetFiles(dest)) File.Delete(f);
+                }
+            }
             using (var archive = ArchiveFactory.OpenArchive(file, null))
             {
                 if (archive.IsSolid || archive.Type == SharpCompress.Common.ArchiveType.SevenZip)
@@ -182,10 +249,20 @@ namespace CustomOutfits
             }
         }
 
-        // target of an archive entry, or null to skip (folder, empty name, or outside root = "zip slip")
+        // what the converter reads from a mod: natives/ (the game files), modinfo.ini and images (its picture); the rest
+        // (texture sources .dds/.psd, readmes, videos, nested archives) is not extracted
+        private static readonly Regex NeededImage = new Regex(@"\.(png|jpe?g|bmp|gif|webp)$", RegexOptions.IgnoreCase);
+        private static bool Needed(string key)
+        {
+            string k = key.Replace('\\', '/');
+            return k.StartsWith("natives/", StringComparison.OrdinalIgnoreCase) || k.IndexOf("/natives/", StringComparison.OrdinalIgnoreCase) >= 0
+                || k.EndsWith("modinfo.ini", StringComparison.OrdinalIgnoreCase) || NeededImage.IsMatch(k);
+        }
+
+        // target of an archive entry, or null to skip (folder, empty name, not needed, or outside root = "zip slip")
         private static string SafeTarget(string root, string key, bool isDir)
         {
-            if (isDir || string.IsNullOrEmpty(key)) return null;
+            if (isDir || string.IsNullOrEmpty(key) || !Needed(key)) return null;
             string target = Path.GetFullPath(Path.Combine(root, key.Replace('/', Path.DirectorySeparatorChar)));
             if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
             Directory.CreateDirectory(Path.GetDirectoryName(target));
@@ -276,28 +353,112 @@ namespace CustomOutfits
             return n.Length > 0 ? n : "Wardrobe";
         }
 
+        // ------------------------------------------------------------------ game of an archive, without extracting it
+        // natives/<platform>/<what> -> game (the same folders ModHasGame looks for)
+        private static readonly Regex NativesPath = new Regex(@"(^|/)natives/(x64|stm)/(.+)$", RegexOptions.IgnoreCase);
+
+        private static string GameOfPath(string key)
+        {
+            var m = NativesPath.Match(key.Replace('\\', '/'));
+            if (!m.Success) return null;
+            string rest = m.Groups[3].Value.ToLowerInvariant();
+            if (rest.StartsWith("escape/character/player/")) return "re3";
+            if (rest.StartsWith("_chainsaw/")) return "re4";
+            if (rest.StartsWith("sectionroot/character/player/") || rest.StartsWith("objectroot/prefab/character/")) return "re2";
+            if (rest.StartsWith("custom_outfits/") || rest.StartsWith("streaming/custom_outfits/")) return "wardrobe";
+            return "";
+        }
+
+        private const string AlreadyConverted = "Already converted: this is a Wardrobe package. Install it in Fluffy Mod Manager as it is.";
+
+        private static bool IsConvertedRoot(string root) =>
+            new[] { "x64", "stm" }.Any(pl => Directory.Exists(Path.Combine(root, "natives", pl, "custom_outfits")));
+
+        /// <summary>Refuses an archive with no files for this game, reading only its list of files.</summary>
+        private static void CheckArchiveGame(string file, string onlyGame)
+        {
+            var games = new HashSet<string>();
+            bool natives = false;
+            try
+            {
+                using (var archive = ArchiveFactory.OpenArchive(file, null))
+                    foreach (var e in archive.Entries)
+                    {
+                        if (e.IsDirectory || string.IsNullOrEmpty(e.Key)) continue;
+                        string g = GameOfPath(e.Key);
+                        if (g == null) continue;
+                        natives = true;
+                        if (g == onlyGame) return; // found one: the mod is for this game
+                        if (g.Length > 0) games.Add(g);
+                    }
+            }
+            catch (Exception e) { throw new IOException("Could not open the archive: " + e.Message); }
+            if (!natives) throw new IOException("No mod found: there is no 'natives' folder inside.");
+            if (games.Remove("wardrobe") && games.Count == 0) throw new IOException(AlreadyConverted);
+            if (games.Count == 0) throw new IOException("No character outfit found in this mod (only other files).");
+            throw new IOException($"Not a {GameNames[onlyGame]} mod (it is for {string.Join(" / ", games.Select(g => GameNames.TryGetValue(g, out var n) ? n : g))}). Choose that game on the first screen to convert it.");
+        }
+
         // ------------------------------------------------------------------ analyze
         /// <summary>re2Dir: the RE2 folder; the RE3 folder is detected through Steam.</summary>
         public static Plan Analyze(string input, string re2Dir) => Analyze(input, g => g == "re2" ? re2Dir : DetectGameDir(g));
 
         /// <summary>gameDirOf("re2"/"re3") gives the game folder (null when unknown).</summary>
-        public static Plan Analyze(string input, Func<string, string> gameDirOf)
+        public static Plan Analyze(string input, Func<string, string> gameDirOf) => Analyze(input, gameDirOf, null, false, null, null);
+
+        /// <summary>Only the parts of the mod for onlyGame (the game picked in the window): a mod of another game is refused,
+        /// and the folders of a pack that are for another game are left out (with a warning).</summary>
+        /// drawLater: the pictures of a mod without one are not drawn here (the window shows the mod at once and calls DrawMissingPictures).
+        /// addons: archives/folders the user gave this mod as add-ons; reuseExtracted: the mod already extracted (read again with add-ons).
+        public static Plan Analyze(string input, string onlyGame, string gameDir, bool drawLater = false, IList<string> addons = null, string reuseExtracted = null) =>
+            Analyze(input, g => g == onlyGame ? gameDir : null, onlyGame, drawLater, addons, reuseExtracted);
+
+        private static Plan Analyze(string input, Func<string, string> gameDirOf, string onlyGame, bool drawLater, IList<string> addons, string reuseExtracted)
         {
+            // (CO_TIMING: how long each step took, as a warning of the mod)
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var steps = new List<string>();
+            void Step(string what) { steps.Add(what + " " + clock.ElapsedMilliseconds + " ms"); clock.Restart(); }
             if (!File.Exists(input) && !Directory.Exists(input)) throw new IOException("File or folder not found: " + input);
             bool isArchive = File.Exists(input);
             if (isArchive && !Archive.IsMatch(input)) throw new IOException("Unsupported file. Use .zip, .rar, .7z or a folder.");
+            // the game first: from the archive's list of files (no extraction, a fraction of a second), so a mod of another game
+            // is refused before the slow part (extracting can take a minute for big mods)
+            if (isArchive && onlyGame != null && reuseExtracted == null) CheckArchiveGame(input, onlyGame);
             string workDir = input, extracted = null;
-            if (isArchive)
+            if (isArchive && reuseExtracted != null && Directory.Exists(reuseExtracted)) workDir = extracted = reuseExtracted; // (read again: no new extraction)
+            else if (isArchive)
             {
                 extracted = TempDir("extract");
-                try { Extract(input, extracted); }
+                try { Step("check"); Extract(input, extracted); Step("extract"); }
                 catch (Exception e) { TryDelete(extracted); throw new IOException("Could not open the archive: " + e.Message); }
                 workDir = extracted;
             }
             var roots = new List<string>();
             FindModRoots(workDir, 0, roots);
             if (roots.Count == 0) { TryDelete(extracted); throw new IOException("No mod found: there is no 'natives' folder inside."); }
-            string game = roots.Any(r => GameOfMod(r) == "re3") ? "re3" : "re2";
+            string game;
+            var otherGames = new List<string>();
+            if (onlyGame != null)
+            {
+                var gameOf = roots.ToDictionary(r => r, GameOfMod);
+                var mine = roots.Where(r => ModHasGame(r, onlyGame)).ToList();
+                foreach (var r in mine) gameOf[r] = onlyGame;
+                if (mine.Count == 0)
+                {
+                    TryDelete(extracted);
+                    var found = gameOf.Values.Distinct().Where(g => g != onlyGame).Select(g => GameNames.TryGetValue(g, out var gn) ? gn : g).ToList();
+                    if (found.Count == 0 && roots.Any(IsConvertedRoot)) throw new IOException(AlreadyConverted);
+                    if (found.Count == 0) throw new IOException("No character outfit found in this mod (only other files).");
+                    throw new IOException($"Not a {GameNames[onlyGame]} mod (it is for {string.Join(" / ", found)}). Choose that game on the first screen to convert it.");
+                }
+                // a pack with folders for other games: those are left out
+                foreach (var r in roots.Where(r => gameOf[r] != onlyGame))
+                    otherGames.Add($"{Path.GetFileName(r)} ({(GameNames.TryGetValue(gameOf[r], out var gn) ? gn : gameOf[r])})");
+                roots = mine;
+                game = onlyGame;
+            }
+            else game = roots.Any(r => GameOfMod(r) == "re3") ? "re3" : "re2";
             string gameDir = gameDirOf(game);
             if (!IsGameDir(gameDir, game))
             {
@@ -311,6 +472,43 @@ namespace CustomOutfits
                 Input = input, IsArchive = isArchive, Extracted = extracted, Game = game, GameDir = gameDir, BaseName = baseName,
                 PackageName = baseName + " (Wardrobe)",
             };
+            // add-ons the user gave this mod (converter window: a separate archive, e.g. the colours of a skin): their folders join
+            // the mod's as add-on options of it, whatever their modinfo "addonfor=" says (the user picked the mod)
+            var baseRoots = roots.ToList();
+            var forcedAddon = new HashSet<string>();
+            foreach (var a in addons ?? new List<string>())
+            {
+                string aName = Path.GetFileName(a.TrimEnd('\\', '/'));
+                try
+                {
+                    bool aArchive = File.Exists(a);
+                    if (aArchive && !Archive.IsMatch(a)) throw new IOException("unsupported file (use .zip, .rar, .7z or a folder)");
+                    if (aArchive) CheckArchiveGame(a, game);
+                    string aDir = a;
+                    if (aArchive)
+                    {
+                        aDir = TempDir("addon");
+                        plan.AddonDirs.Add(aDir);
+                        Extract(a, aDir);
+                    }
+                    var aRoots = new List<string>();
+                    FindModRoots(aDir, 0, aRoots);
+                    aRoots = aRoots.Where(r => ModHasGame(r, game)).ToList();
+                    if (aRoots.Count == 0) throw new IOException("no " + GameNames[game] + " files in it");
+                    foreach (var r in aRoots) { roots.Add(r); forcedAddon.Add(r); }
+                    plan.Addons.Add(new PlanAddon { Input = a, Name = CleanName(aName), Roots = aRoots });
+                }
+                catch (Exception e)
+                {
+                    plan.Addons.Add(new PlanAddon { Input = a, Name = CleanName(aName), Error = e.Message });
+                    plan.Warnings.Add("Add-on " + CleanName(aName) + ": " + e.Message);
+                }
+            }
+            // DX11 (non-RT) or DX12 (RT): from the versions of its files (the window compares it with the installed game)
+            plan.ModBuild = GameBuilds.OfFiles(roots.SelectMany(r => Directory.Exists(Path.Combine(r, "natives"))
+                ? Directory.EnumerateFiles(Path.Combine(r, "natives"), "*", SearchOption.AllDirectories) : Enumerable.Empty<string>()));
+            if (otherGames.Count > 0)
+                plan.Warnings.Add($"Left out (not for {GameNames[game]}): " + string.Join(", ", otherGames) + ".");
             var usedSlugs = new HashSet<string>();
             var reports = new List<KeyValuePair<PlanOption, ConvertReport>>();
             var dlcSwaps = new List<(string Option, string Part, string Label, List<string> Textures)>();
@@ -319,8 +517,12 @@ namespace CustomOutfits
             foreach (var root in roots)
             {
                 var info = ReadModinfo(root);
-                string optName = CleanName(info.TryGetValue("name", out var mn) && mn.Length > 0 ? mn : roots.Count == 1 ? baseName : Path.GetFileName(root));
-                string slugBase = Slugify(CharWords.Replace(roots.Count == 1 ? baseName : optName, " "));
+                // (the mod's own folders decide: an add-on given in the window doesn't rename the mod's single option)
+                bool single = baseRoots.Count == 1 && baseRoots[0] == root;
+                var addonOf = plan.Addons.FirstOrDefault(x => x.Roots != null && x.Roots.Contains(root));
+                string optName = CleanName(info.TryGetValue("name", out var mn) && mn.Length > 0 ? mn
+                    : single ? baseName : addonOf != null && addonOf.Roots.Count == 1 ? addonOf.Name : Path.GetFileName(root));
+                string slugBase = Slugify(CharWords.Replace(single ? baseName : optName, " "));
                 if (game == "re3" && slugBase.Length > 24) slugBase = slugBase.Substring(0, 24).TrimEnd('_'); // RE3 paths are deeper
                 string slug = slugBase + "_" + ShortHash(Path.GetFileName(input.TrimEnd('\\', '/')) + "|" + optName);
                 while (usedSlugs.Contains(slug)) slug += "_2";
@@ -337,6 +539,12 @@ namespace CustomOutfits
                     var b = roots.Where(r => r != root && string.Equals(metaOf[r].Info.TryGetValue("name", out var bn) ? bn.Trim() : "", addonFor.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
                     if (b.Count > 0) { baseRoot = b[0]; baseSlug = metaOf[baseRoot].Slug; }
                 }
+                // an add-on the user gave this mod: for the mod's main folder when its "addonfor=" names none of the mod's
+                if (forcedAddon.Contains(root) && baseRoot == null)
+                {
+                    baseRoot = baseRoots.FirstOrDefault(r => !metaOf[r].Info.ContainsKey("addonfor")) ?? baseRoots.FirstOrDefault();
+                    if (baseRoot != null) baseSlug = metaOf[baseRoot].Slug;
+                }
                 ConvertReport rep;
                 try { rep = ConvertOption(game, root, null, slug, optName, new ConvertOptions { DryRun = true, GameDir = gameDir, BaseRoot = baseRoot, BaseSlug = baseSlug }); }
                 catch (Exception e) { plan.Warnings.Add(optName + ": " + e.Message); continue; }
@@ -346,7 +554,8 @@ namespace CustomOutfits
                     Root = root, Name = optName, Slug = slug, Screenshot = shot,
                     Author = info.TryGetValue("author", out var au) ? au : "",
                     Version = info.TryGetValue("version", out var ve) ? ve : "",
-                    IsAddon = info.ContainsKey("addonfor"), BaseRoot = baseRoot, BaseSlug = baseSlug,
+                    IsAddon = info.ContainsKey("addonfor") || forcedAddon.Contains(root), BaseRoot = baseRoot, BaseSlug = baseSlug,
+                    AddonInput = plan.Addons.FirstOrDefault(x => x.Roots != null && x.Roots.Contains(root))?.Input,
                     Warnings = rep.Warnings,
                 };
                 foreach (var o in rep.Outfits)
@@ -363,7 +572,7 @@ namespace CustomOutfits
                         EachEntry = o.Part == "body" && PickableOf(o).Count > (Re3Menu.ContainsKey(o.Group ?? "") ? 1 : 4),
                         Also = o.Also.Select(c => CharNames.TryGetValue(c, out var an) ? an : c).ToList(),
                     };
-                    foreach (var pv in po.Pickable) pv.Owner = po;
+                    foreach (var pv in po.Pickable) { pv.Owner = po; pv.Root = root; }
                     opt.Outfits.Add(po);
                 }
                 if (opt.Outfits.Count == 0) plan.Warnings.Add(optName + ": no character outfit found (only other files), skipped.");
@@ -371,18 +580,14 @@ namespace CustomOutfits
                 foreach (var w in rep.Warnings) plan.Warnings.Add(optName + ": " + w);
                 foreach (var d in rep.DlcSwaps) dlcSwaps.Add((optName, d.Part, d.Label, d.Textures));
             }
+            Step("analyze");
             if (dlcSwaps.Count > 0) plan.Warnings.Add(DlcSwapWarning(dlcSwaps));
             plan.MenuPictureFile = roots.SelectMany(r => Directory.EnumerateFiles(r, "ui0601_*_iam.tex.*", SearchOption.AllDirectories))
                 .OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
             plan.HasMenuPicture = plan.MenuPictureFile != null;
             if (game == "re2" || game == "re3") plan.DrawReports = reports; // (pictures can be drawn later on request, see Redraw)
-            // no image at all in the mod: the picture of each body is drawn from the outfit itself
-            // (also when its image is not made for the menu, see FitsMenu)
-            if ((game == "re2" || game == "re3") && !plan.HasMenuPicture && plan.Options.All(o => !FitsMenu(o.Screenshot)))
-            {
-                try { if (game == "re3") DrawPicturesRe3(plan, reports); else DrawPictures(plan, reports); }
-                catch { /* no picture: the game shows a placeholder */ }
-            }
+            if (!drawLater) { DrawMissingPictures(plan); Step("draw"); }
+            if (Environment.GetEnvironmentVariable("CO_TIMING") != null) plan.Warnings.Add("timing: " + string.Join(", ", steps));
             if (plan.Options.Count == 0)
             {
                 TryDelete(extracted);
@@ -392,6 +597,23 @@ namespace CustomOutfits
         }
 
         // ------------------------------------------------------------------ drawn pictures
+        /// <summary>A mod without an image (or with one not made for the menu, see FitsMenu): the picture of each body, drawn from the
+        /// outfit itself. Nothing to do if already drawn or if the mod has a picture. True when the mod needs this (pictures drawn).</summary>
+        public static bool NeedsDrawnPictures(Plan plan) =>
+            (plan.Game == "re2" || plan.Game == "re3") && plan.DrawReports != null && !plan.HasMenuPicture && plan.Options.All(o => !FitsMenu(o.Screenshot));
+
+        public static void DrawMissingPictures(Plan plan)
+        {
+            // (the window draws them in the background; saving the mod meanwhile waits here for them)
+            lock (plan)
+            {
+                if (plan.PicturesDrawn || !NeedsDrawnPictures(plan)) return;
+                try { if (plan.Game == "re3") DrawPicturesRe3(plan, plan.DrawReports); else DrawPictures(plan, plan.DrawReports); }
+                catch { /* no picture: the game shows a placeholder */ }
+                finally { plan.PicturesDrawn = true; }
+            }
+        }
+
         private static readonly Dictionary<string, string> NonRtVersion = new Dictionary<string, string>
         {
             ["mesh"] = "1808312334", ["mdf2"] = "10", ["tex"] = "10",
@@ -423,17 +645,19 @@ namespace CustomOutfits
             return paks?.Read("natives/x64/" + (prefix + virt + "." + ver).ToLowerInvariant());
         }
 
-        private static RenderPart DrawPart(string root, string gameDir, GamePaks paks, string mdf, string mesh)
+        // baseRoot: an add-on's files that it doesn't bring are its mod's (a colour add-on ships only materials)
+        private static RenderPart DrawPart(string root, string gameDir, GamePaks paks, string mdf, string mesh, string baseRoot = null)
         {
             if (mdf == null || mesh == null) return null;
-            var mdfB = GameFile(root, gameDir, paks, mdf);
-            var meshB = GameFile(root, gameDir, paks, mesh);
+            var mdfB = GameFile(root, null, null, mdf) ?? GameFile(baseRoot, gameDir, paks, mdf);
+            var meshB = GameFile(root, null, null, mesh) ?? GameFile(baseRoot, gameDir, paks, mesh);
             if (mdfB == null || meshB == null || Mdf2.IsRT(mdfB)) return null;
             // textures: the streaming copy (full size) first; the mod's, then the game's
             return new RenderPart
             {
                 Mdf = mdfB, Mesh = meshB,
                 Texture = t => GameFile(root, null, null, t, "streaming/") ?? GameFile(root, null, null, t)
+                    ?? GameFile(baseRoot, null, null, t, "streaming/") ?? GameFile(baseRoot, null, null, t)
                     ?? GameFile(null, gameDir, paks, t, "streaming/") ?? GameFile(null, gameDir, paks, t),
             };
         }
@@ -475,8 +699,88 @@ namespace CustomOutfits
         {
             if (plan.DrawReports == null) return 0;
             var counts = plan.DrawReports.SelectMany(r => r.Value.Outfits).Where(o => o.Part == "body" && o.Variants != null)
-                .Select(o => plan.Game == "re3" ? (OutfitRender.HasPose(o.Character) ? 1 : 0) : OutfitRender.PoseCount(o.Character)).Where(n => n > 0).ToList();
+                .Select(o => OutfitRender.PoseCount(o.Character)).Where(n => n > 0).ToList();
             return counts.Count == 0 ? 0 : counts.Min();
+        }
+
+        // one drawing at a time: the main pictures (read queue) and the pack's pictures (mod screen) can be asked for together
+        private static readonly object DrawLock = new object();
+
+        /// <summary>RE2: one body variant in a pose, with the face and hair it is worn with in game (the same mod's, same option
+        /// first, else the game's for that costume). RGBA 1024², or null if it can't be drawn.</summary>
+        private static byte[] RenderBody(Plan plan, GamePaks paks, List<KeyValuePair<PlanOption, ConvertReport>> reports,
+            KeyValuePair<PlanOption, ConvertReport> kv, OutfitInfo body, Variant bv, int poseIndex)
+        {
+            string poseKey = OutfitRender.PoseKey(body.Character, poseIndex) ?? body.Character;
+            var pose = OutfitRender.Pose(poseKey);
+            if (pose == null) return null;
+            int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
+            var first = DrawPart(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh, kv.Key.BaseRoot);
+            if (first == null) return null;
+            var parts = new List<RenderPart> { first };
+            var table = Costumes.Table(paks, plan.GameDir, body.Group);
+            var modTable = Costumes.ModTable(kv.Key.Root, body.Group); // the face/hair the mod's own prefabs give each costume
+            foreach (var p in new[] { "face", "hair" })
+            {
+                // the same rule as the script in game: the mod's face/hair if it covers this costume (one with a single version is
+                // worn with any costume; one with several, only with the costumes of its versions), else what the mod's own
+                // prefabs give this costume, else the game's
+                var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
+                    .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null && o.Variants.Count > 0)
+                        .Select(o => new { r.Key.Root, r.Key.BaseRoot, O = o, V = o.Variants.Count == 1 ? o.Variants[0] : o.Variants.FirstOrDefault(x => x.Costumes.Contains(costume)) }))
+                    .FirstOrDefault(x => x.V != null);
+                RenderPart rp = null;
+                if (mine != null)
+                {
+                    var v = mine.V;
+                    rp = DrawPart(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh, mine.BaseRoot);
+                }
+                else if (modTable.TryGetValue(costume, out var mps) && mps.TryGetValue(p, out var mp))
+                    rp = DrawPart(kv.Key.Root, plan.GameDir, paks, mp.Mdf, mp.Mesh, kv.Key.BaseRoot); // (its files: the mod's, else the game's)
+                if (rp == null && mine == null && table.TryGetValue(costume, out var cps) && cps.TryGetValue(p, out var cp))
+                    rp = DrawPart(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
+                if (rp != null) parts.Add(rp);
+            }
+            // Hq on the graphics card (CPU if there is none), strong shadows with the key light from the right,
+            // the character's camera from Blender; a figure it cuts off (other proportions) gets automatic framing
+            var opt = new RenderOptions { Hq = true, Gpu = true, Dark = true };
+            if (OutfitRender.Camera(poseKey, out var cam, out var fovY)) { opt.Camera = cam; opt.FovX = fovY; }
+            var rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+            // a figure the camera cuts off (a tall hat, other proportions): the same camera, a little further back, until it fits.
+            // (It used to switch to automatic framing, whose angle is the old one: that picture looked turned to the right.)
+            for (int k = 0; k < 4 && opt.Camera != null && OutfitRender.TouchesBorder(rgba, 1024, 1024); k++)
+            {
+                opt.FovX *= 1.12;
+                rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+            }
+            return rgba;
+        }
+
+        /// <summary>Picture of one outfit of a pack, drawn in a pose (cached per outfit and pose); null if it can't be drawn.</summary>
+        public static string DrawVariant(Plan plan, PlanVariant pv, int pose)
+        {
+            try
+            {
+                if (plan.DrawReports == null || pv?.Owner == null) return null;
+                var kv = plan.DrawReports.FirstOrDefault(r => r.Key.Outfits.Contains(pv.Owner));
+                if (kv.Key == null) return null;
+                var body = kv.Value.Outfits.FirstOrDefault(o => o.Character == pv.Owner.Character && o.Part == "body" && o.Variants != null);
+                var bv = body?.Variants.FirstOrDefault(v => v.Key == pv.Key);
+                if (bv == null) return null;
+                lock (DrawLock)
+                {
+                    if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
+                    string safe = Regex.Replace(pv.Key ?? "v", "[^a-z0-9_]", "_", RegexOptions.IgnoreCase).ToLowerInvariant();
+                    string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_v_" + safe + "_pose" + pose + ".png");
+                    if (File.Exists(file)) return file;
+                    var paks = Converter.Paks(plan.GameDir);
+                    var rgba = plan.Game == "re3" ? RenderBodyRe3(plan, paks, plan.DrawReports, kv, body, bv, pose) : RenderBody(plan, paks, plan.DrawReports, kv, body, bv, pose);
+                    if (rgba == null) return null;
+                    OutfitRender.SavePng(rgba, 1024, 1024, file);
+                    return file;
+                }
+            }
+            catch { return null; } // this outfit can't be drawn (RT-only files, unknown format): automatic falls back to the mod's picture
         }
 
         private static void DrawPictures(Plan plan, List<KeyValuePair<PlanOption, ConvertReport>> reports)
@@ -496,38 +800,8 @@ namespace CustomOutfits
                     }
                     try
                     {
-                        var bv = body.Variants[body.Default];
-                        int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
-                        var first = DrawPart(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh);
-                        if (first == null) continue;
-                        var parts = new List<RenderPart> { first };
-                        var table = Costumes.Table(paks, plan.GameDir, body.Group);
-                        foreach (var p in new[] { "face", "hair" })
-                        {
-                            var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
-                                .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null)
-                                    .Select(o => new { r.Key.Root, O = o }))
-                                .FirstOrDefault();
-                            RenderPart rp = null;
-                            if (mine != null)
-                            {
-                                var v = mine.O.Variants.FirstOrDefault(x => x.Costumes.Contains(costume)) ?? mine.O.Variants[mine.O.Default];
-                                rp = DrawPart(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh);
-                            }
-                            else if (table.TryGetValue(costume, out var cps) && cps.TryGetValue(p, out var cp))
-                                rp = DrawPart(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
-                            if (rp != null) parts.Add(rp);
-                        }
-                        // Hq on the graphics card (CPU if there is none), strong shadows with the key light from the right,
-                        // the character's camera from Blender; a figure it cuts off (other proportions) gets automatic framing
-                        var opt = new RenderOptions { Hq = true, Gpu = true, Dark = true };
-                        if (OutfitRender.Camera(poseKey, out var cam, out var fovY)) { opt.Camera = cam; opt.FovX = fovY; }
-                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
-                        if (opt.Camera != null && OutfitRender.TouchesBorder(rgba, 1024, 1024))
-                        {
-                            opt.Camera = null;
-                            rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
-                        }
+                        byte[] rgba;
+                        lock (DrawLock) rgba = RenderBody(plan, paks, reports, kv, body, body.Variants[body.Default], plan.Pose);
                         if (rgba == null) continue;
                         if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
                         string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_pose" + plan.Pose + ".png");
@@ -564,22 +838,71 @@ namespace CustomOutfits
             return paks?.Read("natives/stm/" + (prefix + virt + "." + ver).ToLowerInvariant());
         }
 
-        private static RenderPart DrawPartRe3(string root, string gameDir, GamePaks paks, string mdf, string mesh)
+        private static RenderPart DrawPartRe3(string root, string gameDir, GamePaks paks, string mdf, string mesh, string baseRoot = null)
         {
             if (mdf == null || mesh == null) return null;
-            var mdfB = GameFileRe3(root, gameDir, paks, mdf);
-            var meshB = GameFileRe3(root, gameDir, paks, mesh);
+            var mdfB = GameFileRe3(root, null, null, mdf) ?? GameFileRe3(baseRoot, gameDir, paks, mdf);
+            var meshB = GameFileRe3(root, null, null, mesh) ?? GameFileRe3(baseRoot, gameDir, paks, mesh);
             if (mdfB == null || meshB == null) return null;
             return new RenderPart
             {
                 Mdf = mdfB, Mesh = meshB,
                 Texture = t => GameFileRe3(root, null, null, t, "streaming/") ?? GameFileRe3(root, null, null, t)
+                    ?? GameFileRe3(baseRoot, null, null, t, "streaming/") ?? GameFileRe3(baseRoot, null, null, t)
                     ?? GameFileRe3(null, gameDir, paks, t, "streaming/") ?? GameFileRe3(null, gameDir, paks, t),
             };
         }
 
         /// <summary>RE3: draws every body of the mod (characters with a thumbnail pose: Jill) with the face and hair it is worn
         /// with in game: the same mod's, else the game's for the costume it is shown in. Opaque, on black, like the game's pictures.</summary>
+        /// <summary>RE3: one body variant (Jill's pose) with the face and hair it is worn with; RGBA 1024², or null.</summary>
+        private static byte[] RenderBodyRe3(Plan plan, GamePaks paks, List<KeyValuePair<PlanOption, ConvertReport>> reports,
+            KeyValuePair<PlanOption, ConvertReport> kv, OutfitInfo body, Variant bv, int poseIndex)
+        {
+            string poseKey = OutfitRender.PoseKey(body.Character, poseIndex) ?? body.Character;
+            var pose = OutfitRender.Pose(poseKey);
+            var model = Re3.Models.FirstOrDefault(m => m.Id == body.Character);
+            if (pose == null || model == null) return null;
+            int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
+            var first = DrawPartRe3(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh, kv.Key.BaseRoot);
+            if (first == null) return null;
+            var parts = new List<RenderPart> { first };
+            foreach (var p in new[] { "face", "hair" })
+            {
+                // RE3: one face per model, the same with every costume (in game, the faces a pack's prefabs give S.T.A.R.S. / Classic
+                // don't show: JILL ALL STARS wears its default face in all three, and those other faces have their material
+                // names swapped, drawn with the hair texture); the hair does change with the costume (the S.T.A.R.S. beret)
+                int pc = p == "face" ? 0 : costume;
+                // the same rule as the script in game: the mod's face/hair if it covers this costume (one with a single version is
+                // worn with any costume; one with several, only with the costumes of its versions), else what the mod's own
+                // prefabs give this costume, else the game's
+                var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
+                    .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null && o.Variants.Count > 0)
+                        .Select(o => new { r.Key.Root, r.Key.BaseRoot, O = o, V = o.Variants.Count == 1 ? o.Variants[0] : o.Variants.FirstOrDefault(x => x.Costumes.Contains(pc)) }))
+                    .FirstOrDefault(x => x.V != null);
+                RenderPart rp = null;
+                if (mine != null)
+                {
+                    var v = mine.V;
+                    rp = DrawPartRe3(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh, mine.BaseRoot);
+                }
+                else if (model.Table.TryGetValue(pc, out var pcs) && pcs.TryGetValue(p, out var cp))
+                    rp = DrawPartRe3(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
+                if (rp != null) parts.Add(rp);
+            }
+            // the same render as RE2 (graphics card, shadows, key light from the right, the pose's camera from Blender), with
+            // RE3's files and its picture style (opaque figure with a faint glow: the RE3 menu ignores transparency)
+            var opt = new RenderOptions { Re3 = true, Hq = true, Gpu = true, Dark = true, Frame = 0.62, Fill = 0.86 };
+            if (OutfitRender.Camera(poseKey, out var cam, out var fovY)) { opt.Camera = cam; opt.FovX = fovY; }
+            var rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+            for (int k = 0; k < 4 && opt.Camera != null && OutfitRender.TouchesBorder(rgba, 1024, 1024); k++)
+            {
+                opt.FovX *= 1.12; // cut off by the camera: the same angle, a little further back
+                rgba = OutfitRender.Render(parts, pose, 1024, 1024, opt);
+            }
+            return rgba;
+        }
+
         private static void DrawPicturesRe3(Plan plan, List<KeyValuePair<PlanOption, ConvertReport>> reports)
         {
             var paks = Converter.Paks(plan.GameDir);
@@ -590,34 +913,18 @@ namespace CustomOutfits
                     var po = kv.Key.Outfits.FirstOrDefault(x => x.Character == body.Character && x.Part == "body");
                     var model = Re3.Models.FirstOrDefault(m => m.Id == body.Character);
                     if (pose == null || po == null || model == null) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture skipped: pose " + (pose != null) + ", plan outfit " + (po != null) + ", model " + (model != null)); continue; }
+                    if (plan.DrawDir != null)
+                    {
+                        string done = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_pose" + plan.Pose + ".png");
+                        if (File.Exists(done)) { po.Drawn = done; continue; } // drawn before in this pose
+                    }
                     try
                     {
-                        var bv = body.Variants[body.Default];
-                        int costume = bv.Costumes.Count > 0 ? bv.Costumes[0] : 0;
-                        var first = DrawPartRe3(kv.Key.Root, plan.GameDir, paks, bv.Replaces, bv.SrcMesh);
-                        if (first == null) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture skipped: body files not found (" + bv.Replaces + " / " + bv.SrcMesh + ")"); continue; }
-                        var parts = new List<RenderPart> { first };
-                        model.Table.TryGetValue(costume, out var cps);
-                        foreach (var p in new[] { "face", "hair" })
-                        {
-                            var mine = reports.OrderBy(r => r.Key == kv.Key ? 0 : 1)
-                                .SelectMany(r => r.Value.Outfits.Where(o => o.Character == body.Character && o.Part == p && o.Variants != null)
-                                    .Select(o => new { r.Key.Root, O = o }))
-                                .FirstOrDefault();
-                            RenderPart rp = null;
-                            if (mine != null)
-                            {
-                                var v = mine.O.Variants.FirstOrDefault(x => x.Costumes.Contains(costume)) ?? mine.O.Variants[mine.O.Default];
-                                rp = DrawPartRe3(mine.Root, plan.GameDir, paks, v.Replaces, v.SrcMesh);
-                            }
-                            else if (cps != null && cps.TryGetValue(p, out var cp))
-                                rp = DrawPartRe3(null, plan.GameDir, paks, cp.Mdf, cp.Mesh);
-                            if (rp != null) parts.Add(rp);
-                        }
-                        var rgba = OutfitRender.Render(parts, pose, 1024, 1024, RenderOptions.Re3Jill);
-                        if (rgba == null) continue;
+                        byte[] rgba;
+                        lock (DrawLock) rgba = RenderBodyRe3(plan, paks, reports, kv, body, body.Variants[body.Default], plan.Pose);
+                        if (rgba == null) { if (Environment.GetEnvironmentVariable("CO_DEBUG") != null) plan.Warnings.Add("picture skipped: body files not found"); continue; }
                         if (plan.DrawDir == null) plan.DrawDir = TempDir("draw");
-                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + ".png");
+                        string file = Path.Combine(plan.DrawDir, kv.Key.Slug + "_" + body.Character + "_pose" + plan.Pose + ".png");
                         OutfitRender.SavePng(rgba, 1024, 1024, file);
                         po.Drawn = file;
                     }
@@ -663,7 +970,7 @@ namespace CustomOutfits
                 direct = direct.Where(v => !StageLabel.IsMatch(v.Label ?? "")).ToList();
                 if (direct.Count < 2) return new List<PlanVariant>();
             }
-            return direct.Select(v => new PlanVariant { Key = v.Key, Slot = v.Label, Name = "" }).ToList();
+            return direct.Select(v => new PlanVariant { Key = v.Key, Slot = v.Label, Name = "", Costumes = v.Direct.ToList() }).ToList();
         }
 
         /// <summary>Name of a group of options in the Wardrobe menu when the user typed none: the mod name without " (Wardrobe)".</summary>
@@ -683,6 +990,10 @@ namespace CustomOutfits
 
         public static BuildResult Build(Plan plan, string outZip, bool overwrite)
         {
+            // everything switched off in the window: nothing to convert
+            if (plan.Options.SelectMany(o => o.Outfits).All(x => x.Disabled || x.Pickable.Count > 0 && x.Pickable.All(p => p.Disabled)))
+                throw new IOException("every part of this mod is switched off");
+            DrawMissingPictures(plan); // (the window may still be drawing it: waits for it)
             string staging = TempDir("build");
             try
             {
@@ -699,17 +1010,31 @@ namespace CustomOutfits
                     var variantNames = new Dictionary<string, string>();
                     var each = new HashSet<string>();
                     var pictures = new Dictionary<string, string>();
+                    var picturesDrawn = new HashSet<string>();
+                    var autoDrawn = new Dictionary<string, string>();
+                    var disabled = new HashSet<string>();
                     foreach (var o in opt.Outfits)
                     {
+                        // parts and versions switched off in the window: left out of the package
+                        if (o.Disabled) disabled.Add(o.Character + "|" + o.Part);
+                        foreach (var pv in o.Pickable) if (pv.Disabled) disabled.Add(o.Character + "|" + o.Part + "|" + pv.Key);
                         names[o.Character + "|" + o.Part] = (string.IsNullOrWhiteSpace(o.Name) ? opt.Name : o.Name).Trim();
                         foreach (var pv in o.Pickable) if (!string.IsNullOrWhiteSpace(pv.Name)) variantNames[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Name.Trim();
                         if (o.EachEntry)
                         {
                             each.Add(o.Character + "|" + o.Part);
-                            foreach (var pv in o.Pickable) if (pv.Picture != null) pictures[o.Character + "|" + o.Part + "|" + pv.Key] = pv.Picture;
+                            foreach (var pv in o.Pickable)
+                            {
+                                string key = o.Character + "|" + o.Part + "|" + pv.Key;
+                                if (pv.Picture != null) { pictures[key] = pv.Picture; if (pv.PictureDrawn) picturesDrawn.Add(key); continue; }
+                                // automatic: the mod's own picture of that costume (Convert), else one drawn from this outfit
+                                if (Converter.MenuPictureFile(pv.Root, o.Character, pv.Costumes) != null) continue;
+                                if (pv.Drawn == null || !File.Exists(pv.Drawn)) pv.Drawn = DrawVariant(plan, pv, plan.Pose);
+                                if (pv.Drawn != null) autoDrawn[key] = pv.Drawn;
+                            }
                         }
                     }
-                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? (plan.PictureChoice == "pose" ? null : plan.PictureChoice == "mod" ? ModPicture(plan, opt) : MenuShot(plan, opt)),
+                    var rep = ConvertOption(plan.Game, opt.Root, pkgDir, opt.Slug, opt.Name, new ConvertOptions { Names = names, VariantNames = variantNames, VariantPictures = pictures, VariantPicturesDrawn = picturesDrawn, VariantDrawn = autoDrawn, Disabled = disabled, EachEntry = each, PackageName = GroupDefault(plan), GroupNames = plan.GroupNames, GameDir = plan.GameDir, BaseRoot = opt.BaseRoot, BaseSlug = opt.BaseSlug, Package = ShortHash(Path.GetFileName(plan.Input.TrimEnd('\\', '/'))), Thumbnail = plan.CustomPicture ?? (plan.PictureChoice == "pose" ? null : plan.PictureChoice == "mod" ? ModPicture(plan, opt) : MenuShot(plan, opt)),
                         ThumbnailForced = plan.CustomPicture != null || plan.PictureChoice == "pose",
                         Drawn = plan.CustomPicture == null && plan.PictureChoice == "mod" ? null : opt.Outfits.Where(o => o.Drawn != null).GroupBy(o => o.Character).ToDictionary(g => g.Key, g => g.First().Drawn) });
                     result.Outfits += rep.Outfits.Count;
@@ -819,10 +1144,40 @@ namespace CustomOutfits
                 ?? plan.Options.FirstOrDefault();
         }
 
+        /// <summary>A mod read again (add-ons given or removed in the window): what the user had set on it stays, by option name,
+        /// part and version key (names, pictures, one entry per outfit, parts and versions switched off).</summary>
+        public static void CarryOver(Plan from, Plan to)
+        {
+            to.PackageName = from.PackageName;
+            to.CustomPicture = from.CustomPicture;
+            to.PictureChoice = from.PictureChoice;
+            to.Pose = from.Pose;
+            foreach (var kv in from.GroupNames) to.GroupNames[kv.Key] = kv.Value;
+            foreach (var opt in to.Options)
+            {
+                var old = from.Options.FirstOrDefault(o => o.Name == opt.Name);
+                if (old == null) continue;
+                foreach (var o in opt.Outfits)
+                {
+                    var oo = old.Outfits.FirstOrDefault(x => x.Character == o.Character && x.Part == o.Part);
+                    if (oo == null) continue;
+                    o.Name = oo.Name; o.EachEntry = oo.EachEntry; o.Disabled = oo.Disabled;
+                    foreach (var pv in o.Pickable)
+                    {
+                        var op = oo.Pickable.FirstOrDefault(x => x.Key == pv.Key);
+                        if (op == null) continue;
+                        pv.Name = op.Name; pv.Disabled = op.Disabled;
+                        if (op.Picture != null && !op.PictureDrawn) pv.Picture = op.Picture; // (drawn ones were in the old plan's folder)
+                    }
+                }
+            }
+        }
+
         public static void Cleanup(Plan plan)
         {
             if (plan?.Extracted != null && plan.Extracted.Contains("CustomOutfitsConverter")) TryDelete(plan.Extracted);
             if (plan?.DrawDir != null && plan.DrawDir.Contains("CustomOutfitsConverter")) TryDelete(plan.DrawDir);
+            foreach (var d in plan?.AddonDirs ?? new List<string>()) if (d.Contains("CustomOutfitsConverter")) TryDelete(d);
         }
 
         private static void TryDelete(string dir)

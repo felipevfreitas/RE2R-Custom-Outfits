@@ -1,6 +1,7 @@
 <Window x:Class="CustomOutfits.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:CustomOutfits"
         Title="Wardrobe Converter" Icon="Assets/app.ico" Width="1040" Height="760" MinWidth="820" MinHeight="600"
         WindowStartupLocation="CenterScreen" Background="{StaticResource Bg}" Foreground="{StaticResource Text}" AllowDrop="True"
         FontFamily="Segoe UI" FontSize="14" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
@@ -33,174 +34,365 @@
       <DoubleAnimation Storyboard.TargetName="SpinRotate" Storyboard.TargetProperty="Angle" From="0" To="360" Duration="0:0:0.8" />
     </Storyboard>
 
-    <!-- character group (list of parts) -->
-    <DataTemplate x:Key="GroupTemplate">
-      <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Margin="0,0,0,12" ClipToBounds="True">
+    <!-- two-choice switch (a pack: one entry per outfit / one for the whole mod) -->
+    <Style x:Key="Segment" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{StaticResource Muted}" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="B" Background="Transparent" CornerRadius="6" Padding="12,6">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource Text}" /></Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="B" Property="Background" Value="#3A3A44" />
+                <Setter Property="Foreground" Value="{StaticResource Text}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- "Details ▾" / "2 warnings ▾": a text that opens what is under it -->
+    <Style x:Key="Disclosure" TargetType="ToggleButton">
+      <Setter Property="Foreground" Value="{StaticResource Muted}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <StackPanel Orientation="Horizontal" Background="Transparent">
+              <ContentPresenter VerticalAlignment="Center" />
+              <Path x:Name="A" Data="M0,0 L4,4 L8,0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.4" Width="8" Height="4" Stretch="Fill"
+                    VerticalAlignment="Center" Margin="6,1,0,0" RenderTransformOrigin="0.5,0.5">
+                <Path.RenderTransform><RotateTransform x:Name="R" /></Path.RenderTransform>
+              </Path>
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="A" Property="RenderTransform"><Setter.Value><RotateTransform Angle="180" /></Setter.Value></Setter></Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource Text}" /></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- an outfit of a pack: picture (one entry per outfit), the costume it replaces, its name -->
+    <DataTemplate x:Key="PickCard">
+      <Border Padding="8" CornerRadius="8" Background="#14FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1">
         <StackPanel>
-          <Border Background="{StaticResource Panel2}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="16,10" CornerRadius="10,10,0,0">
-            <DockPanel>
-              <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center" />
-              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-            </DockPanel>
-          </Border>
-          <ItemsControl ItemsSource="{Binding Rows}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="16,12">
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="88" />
-                      <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                      <RowDefinition Height="Auto" />
-                      <RowDefinition Height="Auto" />
-                      <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Border Style="{StaticResource PartBadge}" VerticalAlignment="Top" Margin="0,12,0,0">
-                      <TextBlock Text="{Binding PartLabel}" Style="{StaticResource PartText}" />
-                    </Border>
-                    <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
-                    <!-- one part brought several times (the colours of a hair mod): the options of one entry, named by the box above -->
-                    <Border Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Visibility="{Binding OptionsVisibility}"
-                            Background="#14FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
-                      <StackPanel>
-                        <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
-                          <TextBlock>
-                            <Run Text="OPTIONS IN THIS MOD" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
-                            <Run Text="{Binding OptionsCount, Mode=OneWay}" FontSize="11.5" Foreground="#6B6B75" />
-                          </TextBlock>
-                        </Border>
-                        <ItemsControl ItemsSource="{Binding Options}" Focusable="False" Margin="0,4,0,4">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid Margin="14,6">
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="188" />
-                                  <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                                  <TextBlock Text="FROM" FontSize="10" Foreground="#6B6B75" />
-                                  <TextBlock Text="{Binding From}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding From}" Margin="0,1,0,0" />
-                                </StackPanel>
-                                <TextBox Grid.Column="1" VerticalAlignment="Center" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
-                              </Grid>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock Text="In the Wardrobe menu these are one entry with the name above, and these names in its Option list."
-                                   FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" Margin="14,2,14,12" />
-                      </StackPanel>
-                    </Border>
-                    <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Meta}" Margin="0,8,0,0" Focusable="False">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                          <Border x:Name="P" Margin="0,0,6,4" Padding="9,2" CornerRadius="10" Background="#26262D" BorderBrush="{StaticResource Line}" BorderThickness="1">
-                            <TextBlock Text="{Binding Text}" FontSize="11.5" Foreground="{StaticResource Muted}" />
-                          </Border>
-                          <DataTemplate.Triggers>
-                            <DataTrigger Binding="{Binding IsPill}" Value="False">
-                              <Setter TargetName="P" Property="Background" Value="Transparent" />
-                              <Setter TargetName="P" Property="BorderThickness" Value="0" />
-                              <Setter TargetName="P" Property="Padding" Value="0,3,6,2" />
-                            </DataTrigger>
-                          </DataTemplate.Triggers>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <!-- a pack: the outfits of this body, one per game costume it replaces -->
-                    <Border Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Visibility="{Binding PickVisibility}"
-                            Background="#14FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
-                      <StackPanel>
-                        <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
-                          <DockPanel>
-                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding EachEntry}" Content="One entry per outfit" Visibility="{Binding BodyVisibility}"
-                                      ToolTip="On: each outfit gets its own entry (and picture) in the game's costume menu.&#10;Off: one entry that follows the story, with the mod's picture." />
-                            <TextBlock VerticalAlignment="Center">
-                              <Run Text="{Binding PickTitle, Mode=OneWay}" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
-                              <Run Text="{Binding PickCount, Mode=OneWay}" FontSize="11.5" Foreground="#6B6B75" />
-                            </TextBlock>
-                          </DockPanel>
-                        </Border>
-                        <ItemsControl ItemsSource="{Binding PickRows}" Focusable="False" Margin="0,4,0,4">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid Margin="14,6">
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="Auto" />
-                                  <ColumnDefinition Width="132" />
-                                  <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <!-- picture of this outfit's entry (only with one entry per outfit) -->
-                                <Grid Width="44" Height="44" Margin="0,0,12,0" Visibility="{Binding PictureOn, Converter={StaticResource B2V}}">
-                                  <Button Click="VariantPicture_Click" Tag="{Binding}" Cursor="Hand" ToolTip="{Binding PictureTip}">
-                                    <Button.Template>
-                                      <ControlTemplate TargetType="Button">
-                                        <Border x:Name="T" CornerRadius="6" Background="#1AFFFFFF" BorderBrush="#3A3A44" BorderThickness="1" ClipToBounds="True">
-                                          <ContentPresenter />
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="{StaticResource Accent2}" /></Trigger>
-                                        </ControlTemplate.Triggers>
-                                      </ControlTemplate>
-                                    </Button.Template>
-                                    <Grid>
-                                      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding NoPreview, Converter={StaticResource B2V}}">
-                                        <Path Data="M3,5 h18 v14 h-18 z M3,16 l5,-5 l4,4 l3,-3 l6,6 M15.5,8.5 a1.5,1.5 0 1 0 0.01,0" Stroke="#8A8A96" StrokeThickness="1.4"
-                                              StrokeLineJoin="Round" Width="18" Height="14" Stretch="Uniform" HorizontalAlignment="Center" />
-                                        <TextBlock Text="auto" FontSize="9.5" Foreground="#8A8A96" HorizontalAlignment="Center" Margin="0,2,0,0" />
-                                      </StackPanel>
-                                      <Image Source="{Binding Preview}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" />
-                                    </Grid>
-                                  </Button>
-                                  <Button Click="VariantPictureReset_Click" Tag="{Binding}" Cursor="Hand" ToolTip="Use the automatic picture"
-                                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Visibility="{Binding HasPicture, Converter={StaticResource B2V}}">
-                                    <Button.Template>
-                                      <ControlTemplate TargetType="Button">
-                                        <Border x:Name="X" Width="17" Height="17" CornerRadius="9" Background="#2A2A31" BorderBrush="#4A4A55" BorderThickness="1">
-                                          <Path Data="M0,0 L6,6 M6,0 L0,6" Stroke="#D6D6DE" StrokeThickness="1.3" Width="6" Height="6" Stretch="Fill" />
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="X" Property="Background" Value="{StaticResource Accent}" /></Trigger>
-                                        </ControlTemplate.Triggers>
-                                      </ControlTemplate>
-                                    </Button.Template>
-                                  </Button>
-                                </Grid>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
-                                  <TextBlock Text="REPLACES" FontSize="10" Foreground="#6B6B75" />
-                                  <TextBlock Text="{Binding Slot}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Slot}" Margin="0,1,0,0" />
-                                </StackPanel>
-                                <TextBox x:Name="NameBox" Grid.Column="2" VerticalAlignment="Center" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock x:Name="Hint" Grid.Column="2" Visibility="Collapsed" Text="{Binding Placeholder}" IsHitTestVisible="False" Foreground="#62626C"
-                                           VerticalAlignment="Center" Margin="11,0,10,0" TextTrimming="CharacterEllipsis" />
-                              </Grid>
-                              <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding Text.Length, ElementName=NameBox}" Value="0">
-                                  <Setter TargetName="Hint" Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                              </DataTemplate.Triggers>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock Text="{Binding PickHint}" FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" Margin="14,2,14,12" />
-                      </StackPanel>
-                    </Border>
-                  </Grid>
-                </Border>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+          <Grid x:Name="Pic" Height="180" Margin="0,0,0,8" Visibility="{Binding PictureOn, Converter={StaticResource B2V}}" IsEnabled="{Binding Enabled}">
+            <Button Click="VariantPicture_Click" Tag="{Binding}" Cursor="Hand" ToolTip="{Binding PictureTip}">
+              <Button.Template>
+                <ControlTemplate TargetType="Button">
+                  <Border x:Name="T" CornerRadius="6" Background="#12FFFFFF" BorderBrush="#3A3A44" BorderThickness="1" ClipToBounds="True">
+                    <ContentPresenter />
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="{StaticResource Accent2}" /></Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Button.Template>
+              <Grid>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding NoPreview, Converter={StaticResource B2V}}">
+                  <Path Data="M3,5 h18 v14 h-18 z M3,16 l5,-5 l4,4 l3,-3 l6,6 M15.5,8.5 a1.5,1.5 0 1 0 0.01,0" Stroke="#8A8A96" StrokeThickness="1.4"
+                        StrokeLineJoin="Round" Width="26" Height="20" Stretch="Uniform" HorizontalAlignment="Center" />
+                  <TextBlock Text="no picture" FontSize="10.5" Foreground="#8A8A96" HorizontalAlignment="Center" Margin="0,5,0,0" />
+                  <TextBlock Text="click to choose one" FontSize="10" Foreground="#6B6B75" HorizontalAlignment="Center" />
+                </StackPanel>
+                <Image Source="{Binding Preview}" Stretch="Uniform" Margin="3" RenderOptions.BitmapScalingMode="HighQuality" />
+                <!-- its automatic picture is being drawn -->
+                <Grid Width="30" Height="30" Visibility="{Binding DrawingVisibility}">
+                  <Ellipse Stroke="#3A3A44" StrokeThickness="3" />
+                  <Path Stroke="{StaticResource Accent2}" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M15,1.5 A13.5,13.5 0 0 1 28.5,15" RenderTransformOrigin="0.5,0.5">
+                    <Path.RenderTransform><RotateTransform /></Path.RenderTransform>
+                    <Path.Triggers><EventTrigger RoutedEvent="FrameworkElement.Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                      <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="0" To="360" Duration="0:0:0.8" />
+                    </Storyboard></BeginStoryboard></EventTrigger></Path.Triggers>
+                  </Path>
+                </Grid>
+              </Grid>
+            </Button>
+            <Button Click="VariantPictureReset_Click" Tag="{Binding}" Cursor="Hand" ToolTip="Use the automatic picture"
+                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-6,0" Visibility="{Binding HasPicture, Converter={StaticResource B2V}}">
+              <Button.Template>
+                <ControlTemplate TargetType="Button">
+                  <Border x:Name="X" Width="18" Height="18" CornerRadius="9" Background="#2A2A31" BorderBrush="#4A4A55" BorderThickness="1">
+                    <Path Data="M0,0 L6,6 M6,0 L0,6" Stroke="#D6D6DE" StrokeThickness="1.3" Width="6" Height="6" Stretch="Fill" />
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="X" Property="Background" Value="{StaticResource Accent}" /></Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Button.Template>
+            </Button>
+          </Grid>
+          <!-- switched off: left out of the converted mod (greyed, can't be edited) -->
+          <DockPanel>
+            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" VerticalAlignment="Top" ToolTip="{Binding EnabledTip}" />
+            <StackPanel x:Name="SlotInfo">
+              <TextBlock Text="REPLACES" FontSize="10" Foreground="#6B6B75" />
+              <TextBlock Text="{Binding Slot}" FontSize="12.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Slot}" Margin="0,1,0,6" />
+            </StackPanel>
+          </DockPanel>
+          <Grid x:Name="NameRow" IsEnabled="{Binding Enabled}">
+            <TextBox x:Name="NameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontSize="12.5" Padding="7,5" />
+            <TextBlock x:Name="Hint" Visibility="Collapsed" Text="{Binding Placeholder}" IsHitTestVisible="False" Foreground="#62626C" FontSize="12.5"
+                       VerticalAlignment="Center" Margin="9,0,8,0" TextTrimming="CharacterEllipsis" />
+          </Grid>
         </StackPanel>
       </Border>
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding Text.Length, ElementName=NameBox}" Value="0">
+          <Setter TargetName="Hint" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Enabled}" Value="False">
+          <Setter TargetName="Pic" Property="Opacity" Value="0.3" />
+          <Setter TargetName="SlotInfo" Property="Opacity" Value="0.4" />
+          <Setter TargetName="NameRow" Property="Opacity" Value="0.4" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+
+    <!-- a part of a character (body / face / hair): its name in game, where it shows, and its outfits or options -->
+    <DataTemplate x:Key="PartCard">
+      <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+        <StackPanel>
+          <DockPanel>
+            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="{Binding EnabledTip}" />
+            <Border x:Name="Badge" DockPanel.Dock="Left" Style="{StaticResource PartBadge}" Margin="0,0,12,0" MinWidth="58">
+              <TextBlock Text="{Binding PartLabel}" Style="{StaticResource PartText}" HorizontalAlignment="Center" />
+            </Border>
+            <TextBox x:Name="PartName" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="{Binding NameTip}" IsEnabled="{Binding Enabled}" />
+          </DockPanel>
+          <StackPanel x:Name="PartBody" IsEnabled="{Binding Enabled}">
+          <TextBlock Text="{Binding Off}" Visibility="{Binding OffVisibility}" FontSize="12.5" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Margin="70,8,0,0" />
+          <TextBlock Text="{Binding Where}" Visibility="{Binding WhereVisibility}" FontSize="12.5" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="70,8,0,0" />
+
+          <!-- the colours (options) of one entry -->
+          <StackPanel Visibility="{Binding OptionsVisibility}" Margin="70,12,0,0">
+            <TextBlock FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" Margin="0,0,0,6">
+              <Run Text="OPTIONS" /><Run Text="{Binding OptionsCount, Mode=OneWay}" Foreground="#6B6B75" FontWeight="Normal" />
+            </TextBlock>
+            <ItemsControl ItemsSource="{Binding VisibleOptions}" Focusable="False">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="From" Text="{Binding From}" FontSize="12.5" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" ToolTip="{Binding From}"
+                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBox x:Name="OptName" Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontSize="12.5" Padding="7,5" IsEnabled="{Binding Enabled}" />
+                    <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="10,0,0,0" VerticalAlignment="Center"
+                              ToolTip="Include this option in the converted mod" />
+                  </Grid>
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Enabled}" Value="False">
+                      <Setter TargetName="From" Property="Opacity" Value="0.4" />
+                      <Setter TargetName="OptName" Property="Opacity" Value="0.4" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="{Binding AddonOptionsNote}" Visibility="{Binding AddonOptionsVisibility}" FontSize="11.5" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,4" />
+            <TextBlock Text="One entry in the Wardrobe menu with the name above; these are its options." FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <!-- a pack: the outfits of this body (or the versions of this face/hair) -->
+          <StackPanel Visibility="{Binding PickVisibility}" Margin="0,14,0,0">
+            <DockPanel Margin="0,0,0,10">
+              <Border DockPanel.Dock="Right" Visibility="{Binding BodyVisibility}" Background="#1A1A1F" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="2">
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton Style="{StaticResource Segment}" Content="One entry per outfit" IsChecked="{Binding EachEntry}"
+                               ToolTip="Each outfit gets its own entry (and picture) in the game's costume menu." />
+                  <RadioButton Style="{StaticResource Segment}" Content="One entry for the mod" IsChecked="{Binding SingleEntry}"
+                               ToolTip="One entry that follows the story, with the mod's picture." />
+                </StackPanel>
+              </Border>
+              <TextBlock VerticalAlignment="Center">
+                <Run Text="{Binding PickTitle, Mode=OneWay}" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Muted}" />
+                <Run Text="{Binding PickCount, Mode=OneWay}" FontSize="11.5" Foreground="#6B6B75" />
+              </TextBlock>
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding PickRows}" ItemTemplate="{StaticResource PickCard}" Focusable="False">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><local:AutoGrid MinItemWidth="160" Gap="10" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <TextBlock Text="{Binding PickHint}" FontSize="11.5" Foreground="#6B6B75" TextWrapping="Wrap" Margin="0,2,0,0" />
+          </StackPanel>
+
+          <!-- the technical details (story stages, other characters, the folder it came from) -->
+          <StackPanel Visibility="{Binding MetaVisibility}" Margin="70,8,0,0">
+            <ToggleButton x:Name="More" Style="{StaticResource Disclosure}" Content="Details" />
+            <ItemsControl ItemsSource="{Binding Meta}" Margin="0,8,0,0" Focusable="False"
+                          Visibility="{Binding IsChecked, ElementName=More, Converter={StaticResource B2V}}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border x:Name="P" Margin="0,0,6,4" Padding="9,2" CornerRadius="10" Background="#26262D" BorderBrush="{StaticResource Line}" BorderThickness="1">
+                    <TextBlock Text="{Binding Text}" FontSize="11.5" Foreground="{StaticResource Muted}" />
+                  </Border>
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsPill}" Value="False">
+                      <Setter TargetName="P" Property="Background" Value="Transparent" />
+                      <Setter TargetName="P" Property="BorderThickness" Value="0" />
+                      <Setter TargetName="P" Property="Padding" Value="0,3,6,2" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding Enabled}" Value="False">
+          <Setter TargetName="Badge" Property="Opacity" Value="0.4" />
+          <Setter TargetName="PartName" Property="Opacity" Value="0.4" />
+          <Setter TargetName="PartBody" Property="Opacity" Value="0.4" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+
+    <!-- a character of the mod: its name, then a card per part -->
+    <DataTemplate x:Key="GroupTemplate">
+      <StackPanel Margin="0,0,0,8">
+        <DockPanel Margin="2,0,2,8">
+          <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" />
+        </DockPanel>
+        <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource PartCard}" Focusable="False" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- left column of a mod's screen: its picture, its name in Fluffy, a summary, its warnings -->
+    <DataTemplate x:Key="ModSideTemplate">
+      <StackPanel>
+        <Border Height="300" CornerRadius="10" Background="#12FFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" ClipToBounds="True">
+          <Grid>
+            <Image Source="{Binding TilePicture}" Stretch="Uniform" Margin="6" RenderOptions.BitmapScalingMode="HighQuality" />
+            <Image Source="Assets/logo.png" Width="64" Height="64" Opacity="0.22" Visibility="{Binding NoTilePictureVisibility}" RenderOptions.BitmapScalingMode="HighQuality" />
+          </Grid>
+        </Border>
+        <Button Content="Change picture…" Style="{StaticResource BtnSmall}" Click="ChangePicture_Click" Tag="{Binding}" Margin="0,10,0,0"
+                HorizontalAlignment="Stretch" Visibility="{Binding PictureVisibility}"
+                ToolTip="The mod's picture, a pose drawn from the outfit, or an image of yours" />
+        <TextBlock Text="{Binding PictureText}" Visibility="{Binding PictureVisibility}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Muted}" Margin="2,8,2,0" />
+        <TextBlock Text="{Binding PoseText}" Visibility="{Binding PoseVisibility}" FontSize="12" Foreground="#6B6B75" Margin="2,2,2,0" />
+
+        <TextBlock Text="NAME IN FLUFFY MOD MANAGER" Style="{StaticResource Label}" Margin="2,20,0,6" />
+        <TextBox Text="{Binding PackageName, UpdateSourceTrigger=PropertyChanged}" />
+
+        <ItemsControl ItemsSource="{Binding Facts}" Margin="2,16,2,0" Focusable="False">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <DockPanel Margin="0,0,0,5">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Key}" Width="78" FontSize="12" Foreground="#6B6B75" />
+                <TextBlock Text="{Binding Value}" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
+              </DockPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Visibility="{Binding WarningsVisibility}" Margin="0,12,0,0" Padding="12,9" CornerRadius="8" Background="#221D12" BorderBrush="#5A4415" BorderThickness="1">
+          <StackPanel>
+            <ToggleButton x:Name="W" Style="{StaticResource Disclosure}" Foreground="{StaticResource Warn}" FontWeight="SemiBold" Content="{Binding WarningsTitle}" />
+            <TextBlock Text="{Binding WarningsText}" Foreground="#E6D3A8" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Visibility="{Binding IsChecked, ElementName=W, Converter={StaticResource B2V}}" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- right column of a mod's screen: what goes in the game, per character and part -->
+    <DataTemplate x:Key="ModPartsTemplate">
+      <StackPanel>
+        <TextBlock Text="The names are the ones shown in the game's menus. Edit them if you want." Foreground="{StaticResource Muted}" FontSize="12.5" Margin="2,0,2,14" />
+        <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource GroupTemplate}" Focusable="False" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- a tile of the mods grid: picture (or a spinner while the mod is read), name, state -->
+    <DataTemplate x:Key="TileTemplate">
+      <Grid x:Name="Root" Width="172" Margin="0,0,14,14" Background="Transparent">
+        <Button Click="Tile_Click" Tag="{Binding}" Cursor="{Binding Cursor}" ToolTip="{Binding Tip}" Foreground="{StaticResource Text}">
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="F" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Padding="8">
+                <ContentPresenter />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="F" Property="BorderBrush" Value="#4A4A55" /></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+          <StackPanel>
+            <Grid Height="196">
+              <Border CornerRadius="6" Background="#12FFFFFF" />
+              <Image Source="{Binding Picture}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+              <Image Source="Assets/logo.png" Width="56" Height="56" Opacity="0.22" Visibility="{Binding NoPictureVisibility}" RenderOptions.BitmapScalingMode="HighQuality" />
+              <Grid Width="40" Height="40" Visibility="{Binding SpinnerVisibility}">
+                <Ellipse Stroke="#3A3A44" StrokeThickness="4" />
+                <Path Stroke="{StaticResource Accent2}" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M20,2 A18,18 0 0 1 38,20" RenderTransformOrigin="0.5,0.5">
+                  <Path.RenderTransform><RotateTransform /></Path.RenderTransform>
+                  <Path.Triggers>
+                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                      <BeginStoryboard>
+                        <Storyboard RepeatBehavior="Forever">
+                          <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="0" To="360" Duration="0:0:0.8" />
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </EventTrigger>
+                  </Path.Triggers>
+                </Path>
+              </Grid>
+              <Border Width="44" Height="44" CornerRadius="22" Background="#26C8102E" Visibility="{Binding ErrorVisibility}">
+                <Path Data="M0,0 L10,10 M10,0 L0,10" Stroke="#FF8A98" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Width="14" Height="14" Stretch="Fill" />
+              </Border>
+              <!-- made for the other game version (DX11 / DX12) -->
+              <Border VerticalAlignment="Bottom" CornerRadius="0,0,6,6" Background="#E6B8461B" Padding="6,4" Visibility="{Binding WrongBuildVisibility}">
+                <TextBlock Text="{Binding WrongBuildText}" FontSize="11" FontWeight="SemiBold" Foreground="White" TextAlignment="Center" TextWrapping="Wrap" />
+              </Border>
+              <!-- the mod has warnings (read them on its screen) -->
+              <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Width="20" Height="20" CornerRadius="10" Background="{StaticResource Warn}"
+                      Visibility="{Binding WarnVisibility}" ToolTip="This mod has warnings: open it to read them">
+                <TextBlock Text="!" FontWeight="Bold" FontSize="12.5" Foreground="#121214" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+            </Grid>
+            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Margin="2,10,2,0" />
+            <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="2,3,2,2" />
+          </StackPanel>
+        </Button>
+        <!-- remove (shows on hover) -->
+        <Button x:Name="X" Click="TileRemove_Click" Tag="{Binding}" Cursor="Hand" ToolTip="Remove this mod" Visibility="Hidden"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-7,-7,0">
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="B" Width="22" Height="22" CornerRadius="11" Background="#2A2A31" BorderBrush="#4A4A55" BorderThickness="1">
+                <Path Data="M0,0 L7,7 M7,0 L0,7" Stroke="#D6D6DE" StrokeThickness="1.4" Width="7" Height="7" Stretch="Fill" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="{StaticResource Accent}" /></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+        </Button>
+      </Grid>
+      <DataTemplate.Triggers>
+        <Trigger SourceName="Root" Property="IsMouseOver" Value="True"><Setter TargetName="X" Property="Visibility" Value="Visible" /></Trigger>
+      </DataTemplate.Triggers>
     </DataTemplate>
   </Window.Resources>
 
   <Grid>
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
@@ -211,14 +403,57 @@
       </RadialGradientBrush>
     </Grid.Background>
 
+    <!-- top bar: the chosen game (hidden on the game picker) -->
+    <Border x:Name="TopBar" Grid.Row="0" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="16,10" Background="#B0121214" Visibility="Collapsed">
+      <DockPanel>
+        <Button DockPanel.Dock="Left" Style="{StaticResource BtnSmall}" Click="BackToGames_Click" ToolTip="Choose another game" VerticalAlignment="Center" Margin="0,0,14,0">
+          <StackPanel Orientation="Horizontal">
+            <Path Data="M6,0 L0,6 L6,12" Stroke="{StaticResource Text}" StrokeThickness="1.6" Width="6" Height="12" Stretch="Fill" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBlock Text="Games" />
+          </StackPanel>
+        </Button>
+        <Border DockPanel.Dock="Left" Width="26" Height="39" CornerRadius="3" ClipToBounds="True" Margin="0,0,12,0" VerticalAlignment="Center">
+          <Image x:Name="TopCover" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" />
+        </Border>
+        <StackPanel VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock x:Name="TopGame" FontWeight="SemiBold" FontSize="14.5" VerticalAlignment="Center" />
+            <!-- installed game version: DX11 (non-RT) or DX12 (RT) -->
+            <Border x:Name="BuildChip" Margin="10,0,0,0" Padding="8,1,8,2" CornerRadius="9" Background="#22FFFFFF" BorderBrush="#3A3A44" BorderThickness="1" VerticalAlignment="Center">
+              <TextBlock x:Name="BuildText" FontSize="11.5" FontWeight="SemiBold" Foreground="#D6D6DE" />
+            </Border>
+          </StackPanel>
+          <TextBlock FontSize="12">
+            <Run x:Name="TopFolder" Foreground="{StaticResource Muted}" />
+            <Run Text="  " />
+            <Hyperlink Click="ChangeFolder_Click" Foreground="{StaticResource Muted}">change</Hyperlink>
+          </TextBlock>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- first screen: pick the game -->
+    <Grid x:Name="GameView" Grid.Row="1">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24,28">
+          <Image Source="Assets/logo.png" Width="56" Height="56" HorizontalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
+          <TextBlock Text="Choose your game" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0" />
+          <TextBlock Text="The converter works on the mods of one game at a time." Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,6,0,24" />
+          <Viewbox StretchDirection="DownOnly" MaxWidth="960">
+            <StackPanel x:Name="GameCards" Orientation="Horizontal" />
+          </Viewbox>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
     <!-- start: drop the mods -->
-    <ScrollViewer x:Name="EmptyView" Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="24">
+    <ScrollViewer x:Name="EmptyView" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="24" Visibility="Collapsed">
       <StackPanel MaxWidth="900">
-        <Grid x:Name="DropZone" MinHeight="320">
+        <Grid x:Name="DropZone" MinHeight="300">
           <Rectangle x:Name="DropBorder" RadiusX="16" RadiusY="16" Stroke="#3A3A44" StrokeThickness="2" StrokeDashArray="4 3" Fill="#991B1B1F" />
           <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24,48">
             <Image Source="Assets/logo.png" Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,14" RenderOptions.BitmapScalingMode="HighQuality" />
-            <TextBlock Text="Drop skin mods here" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            <TextBlock x:Name="DropTitle" Text="Drop skin mods here" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
             <TextBlock Text=".zip · .rar · .7z · or folders  —  one or many at once" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,8,0,0" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
               <Button Content="Open files" Style="{StaticResource BtnPrimary}" Click="OpenFile_Click" Margin="0,0,10,0" />
@@ -227,85 +462,167 @@
           </StackPanel>
         </Grid>
         <TextBlock TextWrapping="Wrap" TextAlignment="Center" FontSize="12.5" Foreground="{StaticResource Muted}" MaxWidth="620" Margin="0,18,0,0"
-                   Text="The converter moves each mod to its own folder so it no longer replaces the original outfit. Install the result in Fluffy Mod Manager and pick it in game from the costume menu (RE2) or the REFramework menu (Wardrobe)." />
-        <TextBlock HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="12">
-          <Run Text="Game folders:" Foreground="{StaticResource Muted}" />
-          <Hyperlink x:Name="GameLink2" Tag="re2" Click="ChooseGame_Click" Foreground="{StaticResource Muted}">Resident Evil 2</Hyperlink>
-          <Run Text="·" Foreground="{StaticResource Muted}" />
-          <Hyperlink x:Name="GameLink3" Tag="re3" Click="ChooseGame_Click" Foreground="{StaticResource Muted}">Resident Evil 3</Hyperlink>
-        </TextBlock>
+                   Text="The converter moves each mod to its own folder so it no longer replaces the original outfit. Install the result in Fluffy Mod Manager and pick it in game from the costume menu or the REFramework menu (Wardrobe)." />
+
+        <!-- costume DLCs of this game: installed or not -->
+        <Border x:Name="DlcCard" Style="{StaticResource Card}" Margin="0,22,0,0" Visibility="Collapsed">
+          <StackPanel>
+            <DockPanel Margin="0,0,0,10">
+              <TextBlock x:Name="DlcCount" DockPanel.Dock="Right" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center" />
+              <TextBlock Text="COSTUME DLCs IN YOUR GAME" Style="{StaticResource Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
+            <WrapPanel x:Name="DlcList" />
+            <TextBlock x:Name="DlcNote" FontSize="12" Foreground="#6B6B75" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Text="A mod made for a DLC costume you don't have still converts, but if it doesn't bring all its files it can show without textures or invisible in game. The converter warns when that happens." />
+          </StackPanel>
+        </Border>
       </StackPanel>
     </ScrollViewer>
 
-    <!-- loaded mods: names -->
-    <ScrollViewer x:Name="PlanView" Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="24" Visibility="Collapsed">
-      <StackPanel MaxWidth="900">
-        <DockPanel Margin="2,0,2,14">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+    <!-- loaded mods: a grid, one tile per mod; a tile opens that mod's settings -->
+    <ScrollViewer x:Name="PlanView" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="24" Visibility="Collapsed">
+      <StackPanel MaxWidth="968">
+        <DockPanel Margin="2,0,14,16">
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
             <Button Content="Add mods" Style="{StaticResource BtnSmall}" Click="AddMods_Click" Margin="0,0,8,0" />
             <Button Content="Start over" Style="{StaticResource BtnSmall}" Click="StartOver_Click" />
           </StackPanel>
           <StackPanel VerticalAlignment="Center">
             <TextBlock x:Name="ModsTitle" FontSize="15" FontWeight="SemiBold" />
-            <TextBlock Text="Outfit names are shown in the in-game menu. Edit them if you want." Foreground="{StaticResource Muted}" FontSize="12.5" Margin="0,2,0,0" />
+            <TextBlock Text="Click a mod to see its outfits and change names or pictures. Drop more mods here to add them." Foreground="{StaticResource Muted}" FontSize="12.5" Margin="0,2,0,0" />
           </StackPanel>
         </DockPanel>
-
-        <ItemsControl x:Name="Mods">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border Background="#0FFFFFFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,0,0,18">
-                <StackPanel>
-                  <DockPanel Margin="2,0,2,10">
-                    <Button DockPanel.Dock="Right" Content="Remove" Style="{StaticResource BtnSmall}" Click="RemoveMod_Click" Tag="{Binding}"
-                            Visibility="{Binding RemoveVisibility}" VerticalAlignment="Center" />
-                    <StackPanel>
-                      <TextBlock Text="MOD" Style="{StaticResource Label}" />
-                      <TextBlock Text="{Binding FileName}" ToolTip="{Binding Input}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,12,0" />
-                    </StackPanel>
-                  </DockPanel>
-                  <Border Style="{StaticResource Card}" Margin="0,0,0,12">
-                    <StackPanel>
-                      <TextBlock Style="{StaticResource Label}" Margin="0,0,0,6">
-                        <Run Text="MOD NAME" /><Run Text="  (shown in Fluffy Mod Manager)" />
-                      </TextBlock>
-                      <TextBox Text="{Binding PackageName, UpdateSourceTrigger=PropertyChanged}" />
-                    </StackPanel>
-                  </Border>
-                  <Border Style="{StaticResource Card}" Visibility="{Binding PictureVisibility}">
-                    <DockPanel>
-                      <Border DockPanel.Dock="Left" Width="112" Height="112" CornerRadius="6" Background="#16FFFFFF" Margin="0,0,14,0"
-                              Visibility="{Binding PreviewVisibility}" ClipToBounds="True">
-                        <Image Source="{Binding PicturePreview}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
-                      </Border>
-                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <Button Content="Change picture…" Style="{StaticResource BtnSmall}" Click="ChangePicture_Click" Tag="{Binding}"
-                                ToolTip="The mod's picture, a pose drawn from the outfit, or an image of yours" />
-                      </StackPanel>
-                      <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="PICTURE IN THE GAME'S COSTUME MENU" Style="{StaticResource Label}" Margin="0,0,0,4" />
-                        <TextBlock Text="{Binding PictureText}" TextWrapping="Wrap" FontSize="13" />
-                        <TextBlock Text="{Binding PoseText}" Visibility="{Binding PoseVisibility}" FontSize="12.5" Opacity="0.7" Margin="0,3,0,0" />
-                      </StackPanel>
-                    </DockPanel>
-                  </Border>
-                  <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource GroupTemplate}" />
-                  <Border Style="{StaticResource Card}" Background="#221D12" BorderBrush="#5A4415" Visibility="{Binding WarningsVisibility}" Margin="0">
-                    <StackPanel>
-                      <TextBlock Text="Warnings" Foreground="{StaticResource Warn}" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
-                      <TextBlock Text="{Binding WarningsText}" Foreground="#E6D3A8" FontSize="12.5" TextWrapping="Wrap" />
-                    </StackPanel>
-                  </Border>
-                </StackPanel>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
+        <ItemsControl x:Name="Tiles" ItemTemplate="{StaticResource TileTemplate}" Focusable="False">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
     </ScrollViewer>
 
+    <!-- one mod's screen: header, then two columns (left stays put, right scrolls) -->
+    <Grid x:Name="DetailView" Grid.Row="1" Visibility="Collapsed">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+      <DockPanel Margin="24,18,24,14">
+        <Button DockPanel.Dock="Left" Style="{StaticResource BtnSmall}" Click="BackToMods_Click" VerticalAlignment="Center" Margin="0,0,16,0" ToolTip="Back to the mods">
+          <StackPanel Orientation="Horizontal">
+            <Path Data="M6,0 L0,6 L6,12" Stroke="{StaticResource Text}" StrokeThickness="1.6" Width="6" Height="12" Stretch="Fill" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBlock Text="All mods" />
+          </StackPanel>
+        </Button>
+        <Button DockPanel.Dock="Right" Content="Remove" Style="{StaticResource BtnSmall}" Click="RemoveDetail_Click" VerticalAlignment="Center" Margin="12,0,0,0" />
+        <!-- previous / next mod -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" x:Name="DetailNav">
+          <Button x:Name="PrevMod" Style="{StaticResource BtnSmall}" Click="PrevMod_Click" ToolTip="Previous mod" Padding="10,6">
+            <Path Data="M5,0 L0,5 L5,10" Stroke="{StaticResource Text}" StrokeThickness="1.6" Width="5" Height="10" Stretch="Fill" />
+          </Button>
+          <TextBlock x:Name="DetailPos" Foreground="{StaticResource Muted}" FontSize="12.5" VerticalAlignment="Center" Margin="10,0" />
+          <Button x:Name="NextMod" Style="{StaticResource BtnSmall}" Click="NextMod_Click" ToolTip="Next mod" Padding="10,6">
+            <Path Data="M0,0 L5,5 L0,10" Stroke="{StaticResource Text}" StrokeThickness="1.6" Width="5" Height="10" Stretch="Fill" />
+          </Button>
+        </StackPanel>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock x:Name="DetailTitle" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="DetailFile" FontSize="12" Foreground="#6B6B75" TextTrimming="CharacterEllipsis" Margin="0,1,12,0" />
+        </StackPanel>
+      </DockPanel>
+
+      <!-- made for the other game version: converted anyway, but the player must know -->
+      <Border x:Name="BuildWarn" Grid.Row="1" Style="{StaticResource Card}" Margin="24,0,24,14" Background="#2A1A12" BorderBrush="#B8461B" BorderThickness="1.5" Visibility="Collapsed">
+        <DockPanel>
+          <Border DockPanel.Dock="Left" Width="26" Height="26" CornerRadius="13" Background="#B8461B" Margin="0,0,12,0" VerticalAlignment="Top">
+            <TextBlock Text="!" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <StackPanel>
+            <TextBlock x:Name="BuildWarnTitle" FontWeight="SemiBold" Foreground="#FFB38A" FontSize="14" />
+            <TextBlock x:Name="BuildWarnText" Foreground="#F0D2C0" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,0" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <Grid Grid.Row="2" Margin="24,0,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="250" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,0,20">
+          <ContentControl x:Name="DetailSide" ContentTemplate="{StaticResource ModSideTemplate}" Focusable="False" />
+        </ScrollViewer>
+        <DockPanel Grid.Column="1">
+          <!-- tabs: the mod's outfits / the add-ons given to it -->
+          <Border DockPanel.Dock="Top" Margin="22,0,24,14" HorizontalAlignment="Left" Background="#1A1A1F" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="2">
+            <StackPanel Orientation="Horizontal">
+              <RadioButton x:Name="TabOutfits" GroupName="DetailTab" Style="{StaticResource Segment}" Content="Outfits" IsChecked="True" Checked="DetailTab_Checked" />
+              <RadioButton x:Name="TabAddons" GroupName="DetailTab" Style="{StaticResource Segment}" Content="Add-ons" Checked="DetailTab_Checked" />
+            </StackPanel>
+          </Border>
+          <Grid>
+            <ScrollViewer x:Name="DetailScroll" VerticalScrollBarVisibility="Auto" Padding="22,0,24,20">
+              <ContentControl x:Name="Detail" ContentTemplate="{StaticResource ModPartsTemplate}" Focusable="False" />
+            </ScrollViewer>
+            <ScrollViewer x:Name="AddonsScroll" VerticalScrollBarVisibility="Auto" Padding="22,0,24,20" Visibility="Collapsed">
+              <StackPanel>
+                <TextBlock TextWrapping="Wrap" FontSize="12.5" Foreground="{StaticResource Muted}" Margin="2,0,2,14"
+                           Text="Add-ons are separate downloads made for a mod: other colours, another hair, extra parts. They are converted together with this mod and show up as options of its outfits." />
+                <ItemsControl x:Name="AddonList" Focusable="False">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="14,12">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="Remove" Style="{StaticResource BtnSmall}" Click="RemoveAddon_Click" Tag="{Binding Input}" VerticalAlignment="Top" Margin="12,0,0,0" />
+                          <StackPanel>
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding File}" FontSize="11.5" Foreground="#6B6B75" TextTrimming="CharacterEllipsis" ToolTip="{Binding Input}" Margin="0,2,0,0" />
+                            <TextBlock Text="{Binding Status}" Visibility="{Binding StatusVisibility}" Foreground="{Binding StatusBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0" />
+                            <!-- its outfits: name in the Wardrobe menu (an option of the mod's entry) and a switch -->
+                            <ItemsControl ItemsSource="{Binding Parts}" Focusable="False" Margin="0,10,0,0">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="Lbl" Text="{Binding From}" FontSize="12.5" Foreground="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBox x:Name="Nm" Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontSize="12.5" Padding="7,5" IsEnabled="{Binding Enabled}"
+                                             ToolTip="Name of this option in the Wardrobe menu" />
+                                    <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                              ToolTip="Include this in the converted mod" />
+                                  </Grid>
+                                  <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                      <Setter TargetName="Lbl" Property="Opacity" Value="0.4" />
+                                      <Setter TargetName="Nm" Property="Opacity" Value="0.4" />
+                                    </DataTrigger>
+                                  </DataTemplate.Triggers>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Grid MinHeight="160" Margin="0,4,0,0">
+                  <Rectangle x:Name="AddonDropBorder" RadiusX="12" RadiusY="12" Stroke="#3A3A44" StrokeThickness="2" StrokeDashArray="4 3" Fill="#991B1B1F" />
+                  <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20,28">
+                    <TextBlock x:Name="AddonDropTitle" Text="Drop an add-on for this mod here" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    <TextBlock Text=".zip · .rar · .7z · or a folder" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,6,0,0" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                      <Button Content="Choose file" Style="{StaticResource BtnPrimary}" Click="ChooseAddon_Click" Margin="0,0,10,0" />
+                      <Button Content="Choose folder" Style="{StaticResource Btn}" Click="ChooseAddonFolder_Click" />
+                    </StackPanel>
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </DockPanel>
+      </Grid>
+    </Grid>
+
     <!-- result -->
-    <ScrollViewer x:Name="DoneView" Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="24" Visibility="Collapsed">
+    <ScrollViewer x:Name="DoneView" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="24" Visibility="Collapsed">
       <Border Style="{StaticResource Card}" MaxWidth="900" Padding="24,40">
         <StackPanel HorizontalAlignment="Center">
           <Border Width="58" Height="58" CornerRadius="29" Background="#262FBF71" HorizontalAlignment="Center">
@@ -329,7 +646,7 @@
     </ScrollViewer>
 
     <!-- action bar -->
-    <Border x:Name="Actions" Grid.Row="1" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="24,14" Background="#F2121214" Visibility="Collapsed">
+    <Border x:Name="Actions" Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="24,14" Background="#F2121214" Visibility="Collapsed">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
           <Button x:Name="SaveOverButton" Content="Save over original" Style="{StaticResource BtnDanger}" Click="SaveOver_Click" Margin="0,0,10,0" />
@@ -340,7 +657,7 @@
     </Border>
 
     <!-- busy -->
-    <Grid x:Name="Busy" Grid.RowSpan="2" Background="#B80A0A0C" Visibility="Collapsed">
+    <Grid x:Name="Busy" Grid.RowSpan="3" Background="#B80A0A0C" Visibility="Collapsed">
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
         <Grid Width="44" Height="44" HorizontalAlignment="Center">
           <Ellipse Stroke="#3A3A44" StrokeThickness="4" />
@@ -354,9 +671,17 @@
     </Grid>
 
     <!-- temporary notice -->
-    <Border x:Name="Toast" Grid.RowSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="40,0,40,84"
+    <Border x:Name="Toast" Grid.RowSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="40,0,40,84"
             Background="#2A1418" BorderBrush="#6B2531" BorderThickness="1" CornerRadius="8" Padding="16,10" Visibility="Collapsed" MaxWidth="760">
-      <TextBlock x:Name="ToastText" Foreground="#FFD5DB" TextWrapping="Wrap" />
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <!-- long notes (batch conversions) scroll instead of growing over the buttons below -->
+        <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+          <TextBlock x:Name="ToastText" Foreground="#FFD5DB" TextWrapping="Wrap" Margin="0,0,10,0" />
+        </ScrollViewer>
+        <Button Grid.Column="1" Content="✕" VerticalAlignment="Top" Width="24" Height="24" Padding="0" Cursor="Hand"
+                Background="Transparent" Foreground="#E6D3A8" BorderThickness="0" ToolTip="Close" Click="ToastClose_Click" />
+      </Grid>
     </Border>
   </Grid>
 </Window>

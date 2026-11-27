@@ -58,7 +58,7 @@ namespace CustomOutfits
             {
                 if (PoseCache.TryGetValue(character, out var p)) return p;
                 string text = null;
-                using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + character))
+                using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + Resource(character)))
                     if (s != null) using (var r = new StreamReader(s)) text = r.ReadToEnd();
                 if (text != null) p = PoseFromJson(text);
                 PoseCache[character] = p;
@@ -77,6 +77,18 @@ namespace CustomOutfits
         }
 
         public static bool HasPose(string character) => Pose(character) != null;
+
+        // characters that use another one's poses and cameras: the poses are world rotations of each bone, and the joints come
+        // from the model itself, so Claire's poses fit Jill (same bone names) with her own proportions
+        private static readonly Dictionary<string, string> PoseAlias = new Dictionary<string, string> { ["jill"] = "claire" };
+
+        /// <summary>Resource name of a pose or camera: "jill_2" -> "claire_2", "jill_camera" -> "claire_camera".</summary>
+        private static string Resource(string key)
+        {
+            foreach (var a in PoseAlias)
+                if (key == a.Key || key.StartsWith(a.Key + "_")) return a.Value + key.Substring(a.Key.Length);
+            return key;
+        }
 
         /// <summary>How much an albedo colour (sRGB 0..1) looks like skin: 0..1 (light-to-tan skin, clean or dirty; not grey,
         /// black, saturated colours). Same formula in the GPU shader.</summary>
@@ -108,7 +120,7 @@ namespace CustomOutfits
         {
             matrix = null; fovY = 0;
             string text = null;
-            using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + character + "_camera"))
+            using (var s = typeof(OutfitRender).Assembly.GetManifestResourceStream("pose." + Resource(character + "_camera")))
                 if (s != null) using (var r = new StreamReader(s)) text = r.ReadToEnd();
             if (text == null) return false;
             double Num(string x) => double.Parse(x.Trim(), System.Globalization.CultureInfo.InvariantCulture);
@@ -209,6 +221,7 @@ namespace CustomOutfits
             public string Name;
             public Tex Color, Atos, Nrm; // Nrm: NormalRoughnessMap (R,G normal; A roughness), only in Hq
             public double[] Tint;
+            public double[] Emis; // glowing material (emissive shader): its light colour, brightest channel = 1 (linear); null = no glow
             public bool HairAlpha, Cull, Skin, Eye, Face; // Face: face material (GPU: its painted scalp is darkened) // Eye: eyeball (the key light shadow of the lids is softened, as the game eye shader does)
             public double[] Spec1, Spec2; // hair shader (Hq): primary / secondary strand highlight colors
             public double Sharp1, Sharp2, SpecInt, Shift; // Skin: soft light through the skin (Hq)
@@ -326,7 +339,17 @@ namespace CustomOutfits
             void Solve(int i)
             {
                 if (S[i] != null) return;
-                if (!isBody && bodyS.TryGetValue(nm[i], out var bs)) { S[i] = bs; Q[i] = bodyQ[nm[i]]; return; }
+                // a joint the body also has (face, hair): it goes where the body's joint went and turns like it, but around its
+                // OWN rest position. (Taking the body's whole matrix turned it around the body's rest joint: a mod body with
+                // another neck height or proportions than the game's face bent the neck forward, while the game, like Blender,
+                // puts the head on the body's joint.)
+                if (!isBody && bodyS.TryGetValue(nm[i], out var bj))
+                {
+                    var bq = bodyQ[nm[i]] ?? Ident;
+                    S[i] = Mul(Mul(Trans(bj[0], bj[1], bj[2]), bq), Trans(-W[i][3], -W[i][7], -W[i][11]));
+                    Q[i] = bodyQ[nm[i]];
+                    return;
+                }
                 int p = par[i] >= 0 && par[i] < n && !busy[par[i]] ? par[i] : -1;
                 busy[i] = true; // only while solving its parents: guards against a loop in the hierarchy
                 if (p >= 0) Solve(p);
@@ -335,7 +358,8 @@ namespace CustomOutfits
                 if (pose.TryGetValue(nm[i], out var rot) && rot.Length >= 9)
                     q = new[] { rot[0], rot[1], rot[2], 0, rot[3], rot[4], rot[5], 0, rot[6], rot[7], rot[8], 0, 0, 0, 0, 1 };
                 else if (p >= 0) q = Q[p];
-                if (q == null) { S[i] = Ident; Q[i] = null; return; }
+                if (q == null && (p < 0 || ReferenceEquals(S[p], Ident))) { S[i] = Ident; Q[i] = null; return; }
+                q = q ?? Ident; // (not turned, but its parent moved: it follows)
                 // the joint goes where the parent's movement takes it; the bone turns around it
                 double x0 = W[i][3], y0 = W[i][7], z0 = W[i][11];
                 var Sp = p >= 0 ? S[p] : Ident;
@@ -346,7 +370,16 @@ namespace CustomOutfits
                 Q[i] = q;
             }
             for (int i = 0; i < n; i++) Solve(i);
-            if (isBody) for (int i = 0; i < n; i++) { bodyS[nm[i]] = S[i]; bodyQ[nm[i]] = Q[i]; }
+            // the body's posed joints (position) and turns, for the other parts. The first bone of each name: a mod body can repeat
+            // one (JILL ALL STARS has a second "head" under the necklace chain, at chest height; the face went there)
+            if (isBody)
+                for (int i = 0; i < n; i++)
+                {
+                    if (bodyS.ContainsKey(nm[i])) continue;
+                    double x0 = W[i][3], y0 = W[i][7], z0 = W[i][11]; var s = S[i];
+                    bodyS[nm[i]] = new[] { s[0] * x0 + s[1] * y0 + s[2] * z0 + s[3], s[4] * x0 + s[5] * y0 + s[6] * z0 + s[7], s[8] * x0 + s[9] * y0 + s[10] * z0 + s[11] };
+                    bodyQ[nm[i]] = Q[i];
+                }
             var map = new int[mapN];
             for (int i = 0; i < mapN; i++) map[i] = BitConverter.ToUInt16(b, (int)bo + 0x30 + i * 2);
             return new Skin { S = S, Map = map };
@@ -391,6 +424,7 @@ namespace CustomOutfits
                 int matCount = b[lodHdr + 1];
                 var mats = Mdf2.Parse(part.Mdf);
                 var colors = BaseColors(part.Mdf, opt.Re3);
+                var emisC = Params(part.Mdf, "EmissiveColor", 3, opt.Re3); var emisR = Params(part.Mdf, "EmissiveRate", 1, opt.Re3);
                 double[][] P(string name, int c) => opt.Hq ? Params(part.Mdf, name, c, opt.Re3) : null;
                 var hs1 = P("PrimalySpecularColor", 3); var hs2 = P("SecondarySpecularColor", 3);
                 var hsh1 = P("PrimalySpec_Sharpness", 1); var hsh2 = P("SecondSpec_Sharpness", 1);
@@ -402,14 +436,31 @@ namespace CustomOutfits
                     return t;
                 }
                 var matOf = new Mat[matCount]; // null = not drawn
+                // materials by name; mesh slots whose name the mdf2 doesn't have take, in order, the mdf2 materials no slot names
+                // (Reika: the mesh calls two slots pl2020_Skirt/Cardigan_Mat, the mdf2 has wp3100_Lightning_Lamp_Mat and another
+                // instead; in game the lamp material lights the suit's indicators, which its add-ons recolour)
+                var slotNames = Enumerable.Range(0, matCount).Select(i => Str(U64(names + BitConverter.ToUInt16(b, (int)(matIdx + i * 2)) * 8))).ToList();
+                var spare = new Queue<int>(Enumerable.Range(0, mats.Count).Where(k => !slotNames.Contains(mats[k].Name)));
                 for (int i = 0; i < matCount; i++)
                 {
-                    string name = Str(U64(names + BitConverter.ToUInt16(b, (int)(matIdx + i * 2)) * 8));
+                    string name = slotNames[i];
                     int mi = mats.FindIndex(x => x.Name == name);
+                    if (mi < 0 && spare.Count > 0) mi = spare.Dequeue();
                     if (mi < 0 || Regex.IsMatch(name, "sling", RegexOptions.IgnoreCase)) continue; // the weapon sling only shows with some weapons
                     var m = mats[mi];
                     var ct = ColorTypes.Select(ty => m.Textures.FirstOrDefault(x => x.Type == ty)).FirstOrDefault(x => x != null && !Regex.IsMatch(x.Path, "null", RegexOptions.IgnoreCase));
-                    if (ct == null) continue; // cornea, tear line...
+                    // a glowing material (emissive shader: lamps, the lights of a suit): its EmissiveColor, unless EmissiveRate is 0 or the
+                    // emissive map is black (Reika's add-ons only change this colour: blue, red, or off)
+                    double[] emis = null;
+                    var ec = emisC[mi];
+                    bool emissiveShader = Regex.IsMatch(m.Mmtr ?? "", "emissive", RegexOptions.IgnoreCase);
+                    if (ec != null && (emisR[mi] == null || emisR[mi][0] > 0)
+                        && !m.Textures.Any(x => x.Type == "EmissiveMap" && Regex.IsMatch(x.Path, "nullblack", RegexOptions.IgnoreCase)))
+                    {
+                        double mx = Math.Max(ec[0], Math.Max(ec[1], ec[2]));
+                        if (mx > 1e-3) emis = new[] { Math.Max(0, ec[0]) / mx, Math.Max(0, ec[1]) / mx, Math.Max(0, ec[2]) / mx };
+                    }
+                    if (ct == null && emis == null && !emissiveShader) continue; // cornea, tear line... (a lamp with a plain colour is drawn)
                     var at = m.Textures.FirstOrDefault(x => x.Type == "AlphaTranslucentOcclusionSSSMap" && !Regex.IsMatch(x.Path, "null", RegexOptions.IgnoreCase));
                     var bc = colors[mi];
                     var nt = opt.Hq ? m.Textures.FirstOrDefault(x => x.Type == "NormalRoughnessMap" && !Regex.IsMatch(x.Path, "null", RegexOptions.IgnoreCase)) : null;
@@ -417,7 +468,8 @@ namespace CustomOutfits
                     {
                         Name = name,
                         Face = Regex.IsMatch(name, "face", RegexOptions.IgnoreCase),
-                        Color = Texture(ct.Path),
+                        Color = ct != null ? Texture(ct.Path) : null,
+                        Emis = emis,
                         Atos = at != null ? Texture(at.Path) : null,
                         Nrm = nt != null ? Texture(nt.Path) : null,
                         Spec1 = hs1?[mi], Spec2 = hs2?[mi],
@@ -427,7 +479,7 @@ namespace CustomOutfits
                         Tint = bc != null && bc.Any(v => Math.Abs(v - 1) > 0.001) ? bc : null,
                         // hair shaders: the alpha of the color texture is the coverage (elsewhere it is metalness)
                         HairAlpha = !opt.Re3 && Regex.IsMatch(m.Mmtr ?? "", "hair", RegexOptions.IgnoreCase), // (RE3: the alpha of the hair texture is not a cut-out)
-                        Cull = opt.Re3 && Regex.IsMatch(name, "Face_Mat", RegexOptions.IgnoreCase),
+                        Cull = opt.Re3 && Regex.IsMatch(name, "Face_Mat", RegexOptions.IgnoreCase) && Environment.GetEnvironmentVariable("CO_NOCULL") == null, // (CO_NOCULL: tests)
                         Eye = Regex.IsMatch(name, "eye", RegexOptions.IgnoreCase) && !Regex.IsMatch(name, "lash|brow|blow", RegexOptions.IgnoreCase),
                     };
                 }
@@ -747,6 +799,7 @@ namespace CustomOutfits
                     lin[k] += (alb[k] * (1 - metal) * amb[k] * 1.6 + (f0 + (1 - f0) * fe) * amb[k] * 0.8 * (1 - rough * 0.7)) * ao;
                     lin[k] *= 0.4 + 0.6 * ao;
                 }
+                if (M.Emis != null) for (int k = 0; k < 3; k++) lin[k] = M.Emis[k] * 1.6 + lin[k] * 0.03; // a lit lamp shows its own colour
                 double lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
                 for (int k = 0; k < 3; k++)
                 {
@@ -771,7 +824,15 @@ namespace CustomOutfits
                 double d = (by - qy) * (ax - qx) + (qx - bx) * (ay - qy);
                 if (Math.Abs(d) < 1e-12) continue;
                 var M = t.M;
-                if (M.Cull && d > 0) continue; // back-facing skin
+                if (M.Cull && t.N != null)
+                {
+                    // back-facing skin, by the normals against the direction to the camera (as on the GPU; the winding differs between meshes)
+                    double nx = t.N[0] + t.N[3] + t.N[6], ny = t.N[1] + t.N[4] + t.N[7], nz = t.N[2] + t.N[5] + t.N[8];
+                    double vx = 0, vy = 0, vz = 1;
+                    if (cam != null) { vx = -(t.X0 + t.X1 + t.X2); vy = -(t.Y0 + t.Y1 + t.Y2); vz = -(t.Z0 + t.Z1 + t.Z2); }
+                    double ln = Math.Sqrt(nx * nx + ny * ny + nz * nz) * Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                    if (ln > 0 && (nx * vx + ny * vy + nz * vz) / ln < -0.15) continue;
+                }
                 var n = t.N;
                 for (int y = y0; y <= y1; y++)
                     for (int x = x0; x <= x1; x++)
@@ -793,6 +854,7 @@ namespace CustomOutfits
                             colA = s4[3];
                             for (int k = 0; k < 3; k++) col[k] = M.Tint != null ? ToLin(s4[k]) * M.Tint[k] : ToLin(s4[k]);
                         }
+                        else if (M.Tint != null) for (int k = 0; k < 3; k++) col[k] = Math.Min(1, M.Tint[k]); // (a plain colour: lamps)
                         else col[0] = col[1] = col[2] = ToLin(150);
                         zb[i] = (float)z;
                         // light (two-sided: the meshes are not closed)
@@ -813,6 +875,7 @@ namespace CustomOutfits
                         for (int k = 0; k < 3; k++)
                         {
                             double l = col[k] * (L_AMB + L_KEY * key * KEY_C[k] + L_FILL * fil + L_RIM * rim * RIM_C[k]) + spec;
+                            if (M.Emis != null) l = M.Emis[k] * 1.6 + l * 0.03;
                             img[i * 4 + k] = (float)Math.Min(255, Math.Max(0, ToSrgb(l / (1 + l * 0.15)))); // soft roll-off of the highlights
                         }
                         img[i * 4 + 3] = 255;

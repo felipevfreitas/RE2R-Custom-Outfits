@@ -6,6 +6,7 @@
 //   co-cli thumb <image> <out.tex.N> <version>
 //   co-cli branding <logo.png> <project_root>   (logo, icon, Nexus images, game menu placeholder)
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -33,7 +34,7 @@ namespace CustomOutfits.Cli
                     }
                     case "analyze":
                     {
-                        var p = Core.Analyze(args[1], Game(2));
+                        var p = Open(args[1], Game(2));
                         Console.WriteLine("package: " + p.PackageName);
                         foreach (var o in p.Options)
                             foreach (var x in o.Outfits)
@@ -52,7 +53,7 @@ namespace CustomOutfits.Cli
                     }
                     case "build":
                     {
-                        var p = Core.Analyze(args[1], Game(3));
+                        var p = Open(args[1], Game(3));
                         // (tests) CO_EACH=1: one entry per outfit for every pack body; prints the outfits each body lists
                         foreach (var o in p.Options.SelectMany(x => x.Outfits))
                         {
@@ -67,6 +68,81 @@ namespace CustomOutfits.Cli
                         Console.WriteLine($"ok: {r.Output} ({r.Outfits} outfits)");
                         if (OutfitRender.GpuDevice != null) Console.WriteLine("picture drawn on: " + OutfitRender.GpuDevice);
                         foreach (var w in r.Warnings) Console.WriteLine("WARNING: " + w);
+                        return 0;
+                    }
+                    case "extractoutfit":
+                    {
+                        // (posing in Blender, research/render/poses/import_outfit.py) extractoutfit <game dir> <re2|re3> <out dir>
+                        //   <part>=<mesh virt path>:<mdf2 virt path> ... -> meshes, colour textures as PNG, parts.json
+                        bool re3 = args[2] == "re3";
+                        string plat = re3 ? "stm" : "x64", meshV = re3 ? "1902042334" : "1808312334", mdfV = re3 ? "13" : "10", texV = re3 ? "190820018" : "10";
+                        var paks = new GamePaks(args[1]);
+                        string outDir = Path.GetFullPath(args[3]);
+                        Directory.CreateDirectory(Path.Combine(outDir, "textures"));
+                        byte[] Get(string virt, string ver) => paks.Read($"natives/{plat}/streaming/{virt}.{ver}") ?? paks.Read($"natives/{plat}/{virt}.{ver}");
+                        var parts = new List<string>();
+                        foreach (var a in args.Skip(4))
+                        {
+                            string part = a.Substring(0, a.IndexOf('=')), rest = a.Substring(a.IndexOf('=') + 1);
+                            string mv = rest.Substring(0, rest.LastIndexOf(':')), dv = rest.Substring(rest.LastIndexOf(':') + 1);
+                            var mesh = paks.Read($"natives/{plat}/{mv}.{meshV}");
+                            var mdf = paks.Read($"natives/{plat}/{dv}.{mdfV}");
+                            if (mesh == null || mdf == null) { Console.WriteLine($"{part}: not found ({(mesh == null ? mv : dv)})"); return 1; }
+                            string meshFile = Path.Combine(outDir, Path.GetFileName(mv) + "." + meshV);
+                            File.WriteAllBytes(meshFile, mesh);
+                            var mats = new List<string>();
+                            foreach (var m in Mdf2.Parse(mdf))
+                            {
+                                var tex = new[] { "BaseMetalMap", "BaseShiftMap", "BaseMap" }.Select(ty => m.Textures.FirstOrDefault(x => x.Type == ty))
+                                    .FirstOrDefault(x => x != null && x.Path.IndexOf("null", StringComparison.OrdinalIgnoreCase) < 0);
+                                if (tex == null) continue;
+                                var tb = Get(tex.Path, texV);
+                                if (tb == null) { Console.WriteLine("missing " + m.Name + " " + tex.Path); continue; }
+                                string png = Path.Combine(outDir, "textures", Path.GetFileNameWithoutExtension(tex.Path) + ".png");
+                                if (!File.Exists(png))
+                                {
+                                    var px = TexDecode.Mip0(tb, out int w, out int h, out _);
+                                    using (var bmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                                    {
+                                        var d = bmp.LockBits(new System.Drawing.Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                                        var bgra = new byte[px.Length];
+                                        // alpha only where it is a cut-out (RE2 hair); elsewhere it is metalness/masks and Blender would lose the colour under it
+                                        bool keepAlpha = !re3 && (m.Mmtr ?? "").IndexOf("hair", StringComparison.OrdinalIgnoreCase) >= 0;
+                                        for (int i = 0; i < px.Length; i += 4) { bgra[i] = px[i + 2]; bgra[i + 1] = px[i + 1]; bgra[i + 2] = px[i]; bgra[i + 3] = keepAlpha ? px[i + 3] : (byte)255; }
+                                        System.Runtime.InteropServices.Marshal.Copy(bgra, 0, d.Scan0, bgra.Length);
+                                        bmp.UnlockBits(d);
+                                        bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                                    }
+                                }
+                                // (RE3 hair: its alpha is not a cut-out, like in the converter's render)
+                                bool hair = !re3 && (m.Mmtr ?? "").IndexOf("hair", StringComparison.OrdinalIgnoreCase) >= 0;
+                                mats.Add($"\"{m.Name}\": {{\"png\": \"{png.Replace('\\', '/')}\", \"hair\": {(hair ? "true" : "false")}}}");
+                            }
+                            parts.Add($"{{\"part\": \"{part}\", \"mesh\": \"{meshFile.Replace('\\', '/')}\", \"mats\": {{{string.Join(", ", mats)}}}}}");
+                            Console.WriteLine($"{part}: {mats.Count} materials");
+                        }
+                        File.WriteAllText(Path.Combine(outDir, "parts.json"), "[\n" + string.Join(",\n", parts) + "\n]");
+                        return 0;
+                    }
+                    case "pakget":
+                    {
+                        // (research / test mods) pakget <game dir> <natives/... path> <output file>
+                        var data = new GamePaks(args[1]).Read(args[2]);
+                        if (data == null) { Console.WriteLine("not found"); return 1; }
+                        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(args[3])));
+                        File.WriteAllBytes(args[3], data);
+                        Console.WriteLine(data.Length + " bytes");
+                        return 0;
+                    }
+                    case "pakstr":
+                    {
+                        // (research) pakstr <game dir> <natives/... path>: which paks have the file, and the paths it cites
+                        var paks = new GamePaks(args[1]);
+                        var data = paks.Read(args[2]);
+                        if (data == null) { Console.WriteLine("not found"); return 1; }
+                        string text = System.Text.Encoding.Unicode.GetString(data, 0, data.Length & ~1);
+                        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, "[ -~]{6,}"))
+                            if (m.Value.Contains("/")) Console.WriteLine(m.Value);
                         return 0;
                     }
                     case "paklock":
@@ -120,20 +196,59 @@ namespace CustomOutfits.Cli
                         Console.WriteLine($"{parts.Count} parts, {sw.ElapsedMilliseconds} ms");
                         return 0;
                     }
+                    case "mdfinfo":
+                    {
+                        // (research) mdfinfo <mdf2 file>: each material, its master material and textures (type = path)
+                        foreach (var m in Mdf2.Parse(File.ReadAllBytes(args[1])))
+                        {
+                            Console.WriteLine(m.Name + "  [" + m.Mmtr + "]");
+                            foreach (var t in m.Textures) Console.WriteLine("    " + t.Type + " = " + t.Path);
+                        }
+                        return 0;
+                    }
+                    case "bones":
+                    {
+                        // (research) bones <mesh file> [name regex]: rest position of each bone (world, game axes) and its parent
+                        var b = File.ReadAllBytes(args[1]);
+                        long U64(long o) => BitConverter.ToInt64(b, (int)o);
+                        string Str(long o) { int e = (int)o; while (b[e] != 0) e++; return System.Text.Encoding.ASCII.GetString(b, (int)o, e - (int)o); }
+                        long bo = U64(0x30);
+                        int n = (int)BitConverter.ToUInt32(b, (int)bo);
+                        long hier = U64(bo + 0x10), world = U64(bo + 0x20), bidx = U64(0x68), names = U64(0x78);
+                        var nm = new string[n];
+                        for (int i = 0; i < n; i++) nm[i] = Str(U64(names + BitConverter.ToUInt16(b, (int)(bidx + i * 2)) * 8));
+                        var re = args.Length > 2 ? new System.Text.RegularExpressions.Regex(args[2], System.Text.RegularExpressions.RegexOptions.IgnoreCase) : null;
+                        for (int i = 0; i < n; i++)
+                        {
+                            if (re != null && !re.IsMatch(nm[i])) continue;
+                            float F(int k) => BitConverter.ToSingle(b, (int)(world + i * 64 + k * 4));
+                            int p = BitConverter.ToInt16(b, (int)(hier + i * 16 + 2));
+                            Console.WriteLine($"{nm[i],-24} parent {(p >= 0 && p < n ? nm[p] : "-"),-20} pos {F(12):0.000} {F(13):0.000} {F(14):0.000}");
+                        }
+                        Console.WriteLine(n + " bones");
+                        // and the materials the mesh asks for (by name), as the renderer reads them
+                        long lodHdr = U64(0x18), matIdx = U64(0x60);
+                        int matCount = b[lodHdr + 1];
+                        for (int i = 0; i < matCount; i++) Console.WriteLine("material " + i + ": " + Str(U64(names + BitConverter.ToUInt16(b, (int)(matIdx + i * 2)) * 8)));
+                        return 0;
+                    }
                     case "drawpkg":
                     {
                         // drawpkg <converted package folder> <out.png> [hq] [game_folder]: draws body + face + hair (default
                         // variants) of a converted package; missing files come from the game. hq = experimental shading.
                         string pkg = args[1];
                         bool hq = args.Length > 3 && args[3] == "hq";
-                        var paks = Converter.Paks(Game(4));
+                        // (CO_RE3=1: a Resident Evil 3 package: natives/stm and RE3 file versions; game folder = the RE3 one)
+                        bool re3 = Env("CO_RE3") == "1";
+                        string plat = re3 ? "stm" : "x64", vMesh = re3 ? "1902042334" : "1808312334", vMdf = re3 ? "13" : "10", vTex = re3 ? "190820018" : "10";
+                        var paks = Converter.Paks(re3 ? (args.Length > 4 ? args[4] : Core.DetectGameDir("re3")) : Game(4));
                         byte[] Get(string virt, string ver)
                         {
                             foreach (var pre in new[] { "streaming/", "" })
                             {
-                                string f = Path.Combine(pkg, "natives", "x64", (pre + virt + "." + ver).Replace('/', '\\'));
+                                string f = Path.Combine(pkg, "natives", plat, (pre + virt + "." + ver).Replace('/', '\\'));
                                 if (File.Exists(f)) return File.ReadAllBytes(f);
-                                var b = paks.Read(("natives/x64/" + pre + virt + "." + ver).ToLowerInvariant());
+                                var b = paks.Read(("natives/" + plat + "/" + pre + virt + "." + ver).ToLowerInvariant());
                                 if (b != null) return b;
                             }
                             return null;
@@ -144,9 +259,13 @@ namespace CustomOutfits.Cli
                             var js = Directory.GetFiles(Path.Combine(pkg, "reframework", "data", "CustomOutfits", "outfits"), "*_" + part + ".json").FirstOrDefault();
                             if (js == null) continue;
                             string t = File.ReadAllText(js);
+                            // (CO_KEYS=body=<key>,face=<key>...: that version of the part instead of the first)
+                            var want = (Env("CO_KEYS") ?? "").Split(',').Select(x => x.Split('=')).FirstOrDefault(x => x.Length == 2 && x[0] == part);
+                            if (want != null) { int at = t.IndexOf("\"key\": \"" + want[1] + "\""); if (at >= 0) t = t.Substring(at); }
                             var mdf = System.Text.RegularExpressions.Regex.Match(t, "\"mdf\": \"([^\"]+)\"").Groups[1].Value;
                             var mesh = System.Text.RegularExpressions.Regex.Match(t, "\"mesh\": \"([^\"]+)\"").Groups[1].Value;
-                            parts.Add(new RenderPart { Mdf = Get(mdf, "10"), Mesh = Get(mesh, "1808312334"), Texture = p => Get(p, "10") });
+                            Console.WriteLine(part + ": " + mesh);
+                            parts.Add(new RenderPart { Mdf = Get(mdf, vMdf), Mesh = Get(mesh, vMesh), Texture = p => Get(p, vTex) });
                         }
                         return DrawTest(parts, args[2], hq, Env("CO_POSE"), Env("CO_CAMERA"));
                     }
@@ -213,9 +332,26 @@ namespace CustomOutfits.Cli
         private static string Env(string n) { var v = Environment.GetEnvironmentVariable(n); return string.IsNullOrEmpty(v) ? null : v; }
 
         // test render (drawpkg / drawgame): Claire's built-in pose and framing, or a pose / camera exported from Blender
+        // (tests) CO_GAMEID=re2|re3 + CO_ADDONS=<a>|<b>: the mod with add-ons, as the window opens it; CO_OFF=<character|part[|key]>,...:
+        // parts/versions switched off
+        private static Plan Open(string input, string gameDir)
+        {
+            var addons = Env("CO_ADDONS")?.Split('|');
+            var p = addons != null || Env("CO_GAMEID") != null
+                ? Core.Analyze(input, Env("CO_GAMEID") ?? "re2", gameDir, false, addons)
+                : Core.Analyze(input, gameDir);
+            foreach (var off in (Env("CO_OFF") ?? "").Split(',').Where(x => x.Length > 0))
+            {
+                var k = off.Split('|');
+                foreach (var o in p.Options.SelectMany(x => x.Outfits).Where(o => o.Character == k[0] && o.Part == k[1]))
+                    if (k.Length == 2) o.Disabled = true; else foreach (var v in o.Pickable.Where(v => v.Key == k[2])) v.Disabled = true;
+            }
+            return p;
+        }
+
         private static int DrawTest(System.Collections.Generic.List<RenderPart> parts, string outPng, bool hq, string poseFile, string cameraFile)
         {
-            var opt = new RenderOptions { Hq = hq, Dark = Env("CO_LOOK") == "dark", Gpu = Env("CO_GPU") == "1" };
+            var opt = new RenderOptions { Hq = hq, Dark = Env("CO_LOOK") == "dark", Gpu = Env("CO_GPU") == "1", Re3 = Env("CO_RE3") == "1" };
             if (Env("CO_KEY") != null) opt.Key = Env("CO_KEY").Split(',').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
             int w = 1024, h = 1024;
             if (cameraFile != null)

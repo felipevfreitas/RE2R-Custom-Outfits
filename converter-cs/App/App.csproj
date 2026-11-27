@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <!-- Wardrobe Converter (RE2 and RE3): WPF program (.NET Framework 4.8, included in Windows 10/11).
        Costura embeds the libraries in the .exe: a single file. -->
   <Import Project="..\Common.props" />
@@ -8,7 +8,7 @@
     <AssemblyName>Wardrobe-Converter</AssemblyName>
     <Product>Wardrobe Converter</Product>
     <AssemblyTitle>Wardrobe Converter</AssemblyTitle>
-    <Version>1.8.1</Version>
+    <Version>2.0.0</Version>
     <Description>Converts Resident Evil 2 and 3 Remake skin mods so they no longer replace the original outfits.</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DebugType>none</DebugType>
@@ -19,6 +19,8 @@
     <!-- window icon and logo; logo-source.png (current) and .webp (old) are only originals, not built into the .exe -->
     <Resource Include="Assets\app.ico" />
     <Resource Include="Assets\logo.png" />
+    <!-- covers of the game picker (400x600 JPG) -->
+    <Resource Include="Assets\covers\*.jpg" />
     <None Remove="Assets\logo-source.webp" />
     <None Remove="Assets\logo-source.png" />
   </ItemGroup>

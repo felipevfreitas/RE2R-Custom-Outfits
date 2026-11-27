@@ -12,11 +12,13 @@ Downloads are on the [Releases](../../releases) page.
 
 Run `Wardrobe-Converter.exe` (no install needed; .NET Framework 4.8 is already part of Windows 10/11).
 
-1. Drag one or more skin mods (`.zip`, `.rar`, `.7z` or a folder) onto the window.
-2. Check the outfit names and the picture the outfit gets in the game's Costumes menu (RE2 and RE3). **Choose image…** uses another image; **Use default** goes back.
-3. Save. Each mod becomes a `.zip` ready for Fluffy Mod Manager.
+1. Pick the game (Resident Evil 2 or 3). Its folder is found through Steam, or asked for once; the top bar shows the game version (DX11 non-RT or DX12 RT) and the start screen lists the costume DLCs you have.
+2. Drag one or more skin mods (`.zip`, `.rar`, `.7z` or a folder) onto the window. Each one gets a tile and is read in the background; mods of another game are refused at once, and mods made for the other game version are flagged.
+3. Click a tile to see the mod: its picture for the game's Costumes menu (**Change picture…**: the mod's picture, a pose drawn from the outfit, or an image of yours), the outfit names, the outfits of a pack with their own pictures, and a switch to leave out any part or outfit.
+4. **Add-ons** (other colours, another hair... published separately for a mod): open the mod and drag the add-on onto the window. It is converted together with the mod as options of its outfits.
+5. Save. Each mod becomes a `.zip` ready for Fluffy Mod Manager.
 
-The game is recognized from the mod's files. The converter needs that game installed: it reads some original files (materials a mod doesn't ship, the costume tables) from the game's `.pak` files. Only the game the mod is for is needed (you can convert RE3 mods without having RE2, and the reverse). Its folder is found automatically through Steam; if it isn't, the converter asks for it. Both folders can be changed with the "Game folders" links on the start screen.
+The converter needs the game installed: it reads some original files (materials a mod doesn't ship, the costume tables) from the game's `.pak` files.
 
 ### What the converter does
 
@@ -25,7 +27,7 @@ The game is recognized from the mod's files. The converter needs that game insta
 - Works out which costume, body, face or hair each file belongs to, and the story stage it is used in (dirty, injured, without jacket...).
 - Writes one JSON per outfit part in `reframework/data/CustomOutfits/outfits/`, which the script reads.
 - Copies new master materials and high-resolution (`streaming/`) textures the mod ships, and warns when a material needs files that neither the mod nor the game has.
-- Makes the picture for the game's Costumes menu (`.tex`): the mod's own costume-menu picture, else its image, else one drawn from the outfit itself (a small software renderer: the body, face and hair in a pose made in Blender, with the mod's textures; Claire and Jill for now: Leon and Carlos outfits without an image get a placeholder).
+- Makes the picture for the game's Costumes menu (`.tex`): the mod's own costume-menu picture, else its image, else one drawn from the outfit itself (a renderer on the graphics card, with a CPU fallback: the body, face and hair in two poses made in Blender, with the mod's textures; Claire and Jill for now: Leon and Carlos outfits without an image get a placeholder). Each outfit of a pack gets its own picture.
 - Writes `modinfo.ini` (name, author, version, screenshot, Fluffy category) and the final `.zip`.
 
 The original mod is never modified unless you choose **Save over original**.

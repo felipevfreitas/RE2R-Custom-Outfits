@@ -436,6 +436,11 @@ namespace CustomOutfits
                 {
                     string part = kv.Key;
                     var variants = kv.Value;
+                    // switched off in the window: the part, or some of its versions (with their copies for Jill's other models);
+                    // the costumes they were worn with get the game's
+                    if (Converter.IsDisabled(opts, menu, part, null)) continue;
+                    variants.RemoveAll(v => Converter.IsDisabled(opts, menu, part, v.Key));
+                    if (variants.Count == 0) continue;
                     foreach (var v in variants)
                     {
                         var m = variantModel[v];

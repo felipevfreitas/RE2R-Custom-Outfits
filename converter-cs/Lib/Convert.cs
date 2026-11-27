@@ -85,6 +85,9 @@ namespace CustomOutfits
         public Dictionary<string, string> Names = new Dictionary<string, string>(); // "character|part" -> name
         public string GameDir;
         public Dictionary<string, string> VariantPictures = new Dictionary<string, string>(); // "character|part|variant key" -> image of its entry
+        public HashSet<string> VariantPicturesDrawn = new HashSet<string>(); // keys of VariantPictures that are drawn poses (transparent, shown whole)
+        public HashSet<string> Disabled = new HashSet<string>(); // "character|part" and "character|part|variant key" switched off: left out
+        public Dictionary<string, string> VariantDrawn = new Dictionary<string, string>(); // automatic picture drawn from the outfit, used when the mod has none for that costume
         public string PackageName; // name of the group when a package has several outfits of the same part
         public Dictionary<string, string> GroupNames = new Dictionary<string, string>(); // "character|part" -> name of that group in the Wardrobe menu (wins over PackageName)
         public HashSet<string> EachEntry = new HashSet<string>(); // "character|body": an entry per outfit in the game's costume menu
@@ -187,6 +190,16 @@ namespace CustomOutfits
             var list = set.ToList();
             list.Sort(StringComparer.Ordinal);
             return list;
+        }
+
+        /// <summary>A part (key null) or one of its versions switched off in the window. Versions of other models of the same look
+        /// (RE3 "key@jill_infected") follow it.</summary>
+        public static bool IsDisabled(ConvertOptions opts, string character, string part, string key)
+        {
+            if (opts?.Disabled == null || opts.Disabled.Count == 0) return false;
+            if (key == null) return opts.Disabled.Contains(character + "|" + part);
+            int at = key.IndexOf('@');
+            return opts.Disabled.Contains(character + "|" + part + "|" + key) || at > 0 && opts.Disabled.Contains(character + "|" + part + "|" + key.Substring(0, at));
         }
 
         public static ConvertReport Convert(string modRoot, string outRoot, string slug, string displayName, ConvertOptions opts = null)
@@ -475,10 +488,21 @@ namespace CustomOutfits
                     if (!table.TryGetValue(kv.Key, out var parts)) table[kv.Key] = parts = new Dictionary<string, CostumePart>();
                     foreach (var p in kv.Value) parts[p.Key] = p.Value;
                 }
+                // files of the versions switched off in the window (before they are taken out below)
+                var offReplaces = new HashSet<string>(byPart.SelectMany(kv => kv.Value.Where(v => IsDisabled(opts, character, kv.Key, v.Key)).Select(v => v.Replaces))
+                    .Where(x => x != null), StringComparer.OrdinalIgnoreCase);
                 foreach (var kv in byPart)
                 {
                     string part = kv.Key;
                     var variants = kv.Value;
+                    // switched off in the window: the part, or some of its versions (their costumes go to the others, else the game)
+                    if (IsDisabled(opts, character, part, null)) continue;
+                    var off = variants.Where(v => IsDisabled(opts, character, part, v.Key)).ToList();
+                    if (off.Count > 0)
+                    {
+                        variants.RemoveAll(off.Contains);
+                        if (variants.Count == 0) continue;
+                    }
                     int def = AssignCostumes(variants, table, group, part);
                     // names the user gave to the outfits of a pack (converter window)
                     foreach (var vv in variants)
@@ -523,15 +547,17 @@ namespace CustomOutfits
                         {
                             string safe = Regex.Replace(vv.Key ?? "v", "[^a-z0-9_]", "_", RegexOptions.IgnoreCase).ToLowerInvariant();
                             int tw = 0, th = 0;
-                            if (opts.VariantPictures.TryGetValue($"{character}|{part}|{vv.Key}", out var img) && File.Exists(img))
+                            string vkey = $"{character}|{part}|{vv.Key}";
+                            if (opts.VariantPictures.TryGetValue(vkey, out var img) && File.Exists(img))
                             {
-                                bool any = false;
+                                // a drawn pose keeps its transparency and is shown whole, like the drawn picture of the mod
+                                bool drawnPose = opts.VariantPicturesDrawn.Contains(vkey), any = false;
                                 foreach (var pl in plats)
                                 {
                                     int ver = pl == "stm" ? 34 : 10;
-                                    if (Tex.WriteThumbnail(img, OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumb_{safe}.tex.{ver}"), ver, out tw, out th)) any = true;
+                                    if (Tex.WriteThumbnail(img, OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumb_{safe}.tex.{ver}"), ver, out tw, out th, 1024, drawnPose)) any = true;
                                 }
-                                if (any) { vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = false; }
+                                if (any) { vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = drawnPose; }
                             }
                             else
                             {
@@ -549,6 +575,17 @@ namespace CustomOutfits
                                         tw = BitConverter.ToUInt16(hd, 8); th = BitConverter.ToUInt16(hd, 10);
                                     }
                                     vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = true;
+                                }
+                                // no picture of this costume in the mod: the one drawn from this outfit
+                                else if (opts.VariantDrawn.TryGetValue(vkey, out var auto) && File.Exists(auto))
+                                {
+                                    bool any = false;
+                                    foreach (var pl in plats)
+                                    {
+                                        int ver = pl == "stm" ? 34 : 10;
+                                        if (Tex.WriteThumbnail(auto, OsPath(outRoot, $"natives/{pl}/{newVirtBase}/thumb_{safe}.tex.{ver}"), ver, out tw, out th, 1024, true)) any = true;
+                                    }
+                                    if (any) { vv.Thumb = newVirtBase + "/thumb_" + safe + ".tex"; vv.ThumbW = tw; vv.ThumbH = th; vv.ThumbFull = true; }
                                 }
                             }
                         }
@@ -572,6 +609,8 @@ namespace CustomOutfits
                             foreach (var p in new[] { "face", "hair" })
                             {
                                 if (!m.Value.TryGetValue(p, out var prefab)) continue;
+                                // (a version switched off in the window: the mod's prefab no longer gives it)
+                                if (IsDisabled(opts, character, p, null) || offReplaces.Contains(prefab.Mdf)) continue;
                                 var other = byPart.FirstOrDefault(x => x.Key == p).Value;
                                 var conv = other?.FirstOrDefault(x => x.Replaces == prefab.Mdf);
                                 var item = conv != null
@@ -654,8 +693,11 @@ namespace CustomOutfits
         private const int StoryNormal = 16, StoryAlt = 17; // the game's own numbers of the two story entries
         private static readonly Dictionary<string, int[]> MenuOrder = new Dictionary<string, int[]>
         {
-            ["claire"] = new[] { 0, 3, 5, 8, 10, 11, 12, 13 },
-            ["leon"] = new[] { 0, 1, 3, 5, 8, 10, 11, 13 },
+            // the DLC costumes come in the order of the game's menu, not by number: Claire 06 = Military (b), 07 = Noir (a)
+            // (testarossa's pictures, 2026-11-26: 06 dated like its Military files, 07 like its Noir files; TFD Nell, a
+            // Military skin, names its picture 06). Leon by the same rule, b (Arklay Sheriff) before a (Noir): not verified.
+            ["claire"] = new[] { 0, 3, 5, 8, 11, 10, 12, 13 },
+            ["leon"] = new[] { 0, 1, 3, 5, 8, 11, 10, 13 },
         };
 
         // picture number of a game costume (or a story entry), or -1 when the menu has no entry for it (the dirty stages)
@@ -680,6 +722,13 @@ namespace CustomOutfits
             // a mod with a single costume-menu picture under another number (TFD Nell TFO replaces Military, 07, but names its
             // picture 06): that picture is still the outfit's, rather than the mod's screenshot cropped
             return MenuPictureOf(modRoot, character, order, true);
+        }
+
+        /// <summary>The costume-menu picture the mod brings for one of these game costumes (a .tex; the non-RT one first), or null.</summary>
+        public static string MenuPictureFile(string modRoot, string character, IEnumerable<int> costumes)
+        {
+            if (modRoot == null || character == null) return null;
+            return MenuPictureOf(modRoot, character, costumes)?.Select(x => x.File).OrderBy(f => f.EndsWith(".10") ? 0 : 1).FirstOrDefault();
         }
 
         /// <summary>The mod's costume-menu picture for the first of these game costumes that has one.</summary>
